@@ -1,0 +1,932 @@
+//@version=6
+
+indicator("AMT Balance + Volume Profile", shorttitle="AMT-BVP", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500, max_bars_back=5000)
+
+// ================= INPUT =================
+
+g1 = "Balance & Breakout"
+
+atrLen    = input.int(14, "ATR length", minval=1, maxval=5000, group=g1)
+
+balLen    = input.int(24, "Jendela balance (bar)", minval=6, maxval=5000, group=g1)
+
+balMaxATR = input.float(4.5, "Max range balance (x ATR)", minval=1.0, step=0.5, group=g1)
+
+brkBuf    = input.float(0.1, "Buffer breakout (x ATR)", minval=0.0, step=0.05, group=g1)
+
+initBody  = input.float(1.2, "Body initiative (x ATR)", minval=0.1, step=0.1, group=g1)
+
+reqVol    = input.bool(false, "Initiative wajib volume > rata-rata", group=g1)
+
+volMult   = input.float(1.2, "Syarat volume (x SMA20)", minval=0.1, step=0.1, group=g1)
+
+accBars   = input.int(2, "Acceptance: jumlah close di luar edge", minval=1, group=g1)
+
+retestTol = input.float(0.5, "Toleransi retest (x ATR)", minval=0.0, step=0.1, group=g1)
+
+ext1      = input.float(1.0, "Target 1 (x range)", minval=0.1, step=0.5, group=g1)
+
+ext2      = input.float(1.5, "Target 2 (x range)", minval=0.1, step=0.5, group=g1)
+
+ext3      = input.float(2.0, "Target 3 (x range)", minval=0.1, step=0.5, group=g1)
+
+extBars   = input.int(60, "Panjang garis target (bar)", minval=10, group=g1)
+
+g2 = "Excess (tail)"
+
+showExc    = input.bool(true, "Tampilkan Excess", group=g2)
+
+excWickATR = input.float(2.0, "Min wick (x ATR)", minval=0.5, step=0.1, group=g2)
+
+excWickPct = input.float(0.35, "Min wick / range candle", minval=0.1, maxval=0.9, step=0.05, group=g2)
+
+excLook    = input.int(30, "Harus ekstrem N bar", minval=5, maxval=5000, group=g2)
+
+g3 = "Volume Profile"
+
+showVP   = input.bool(true, "Tampilkan Volume Profile", group=g3)
+
+vpMode   = input.string("Session (Day)", "Rentang profile", options=["Session (Day)", "Lookback bars"], group=g3)
+
+vpLook   = input.int(200, "Lookback (bar)", minval=20, maxval=4000, group=g3)
+
+vpRows   = input.int(40, "Jumlah row", minval=10, maxval=100, group=g3)
+
+vaPct    = input.float(70.0, "Value Area %", minval=50.0, maxval=95.0, group=g3)
+
+vpWidth  = input.int(30, "Lebar histogram (bar)", minval=10, maxval=200, group=g3)
+
+showPrev = input.bool(true, "POC/VAH/VAL sesi sebelumnya", group=g3)
+
+g4 = "Initial Balance"
+
+showIB = input.bool(true, "Tampilkan IB", group=g4)
+
+ibSess = input.session("0800-0900", "Jendela IB", group=g4)
+
+ibTz   = input.string("Europe/London", "Timezone IB", group=g4)
+
+g6 = "Sinyal Entry"
+
+entryPB    = input.bool(true, "Entry PULLBACK (setelah breakout)", group=g6)
+
+entryBrk   = input.bool(false, "Entry BREAKOUT (candle initiative)", group=g6)
+
+entryExc   = input.bool(false, "Entry EXCESS REV (bar konfirmasi setelah tail)", group=g6)
+
+pbMin      = input.float(0.30, "Pullback min (x impuls)", minval=0.05, maxval=0.95, step=0.05, group=g6)
+
+pbMax      = input.float(0.90, "Pullback max (x impuls)", minval=0.10, maxval=1.0, step=0.05, group=g6)
+
+maxEntries = input.int(2, "Maks entry pullback per breakout", minval=1, group=g6)
+
+slBuf      = input.float(0.3, "Buffer SL (x ATR)", minval=0.0, step=0.1, group=g6)
+
+maxRiskATR = input.float(3.0, "Max risiko (x ATR)", minval=0.5, step=0.5, group=g6)
+
+rr1        = input.float(1.0, "TP1 (R)", minval=0.2, step=0.1, group=g6)
+
+rr2        = input.float(2.0, "TP2 (R)", minval=0.2, step=0.1, group=g6)
+
+sigCool    = input.int(3, "Jeda antar sinyal (bar)", minval=0, group=g6)
+
+useSess    = input.bool(false, "Filter jam sesi", group=g6)
+
+sigSess    = input.session("0700-2000", "Jam sinyal", group=g6)
+
+sigTz      = input.string("Europe/London", "Timezone jam sinyal", group=g6)
+
+g5 = "Tampilan"
+
+showTbl = input.bool(true, "Tampilkan tabel ringkasan", group=g5)
+
+tblPos = input.string("Kanan Atas", "Posisi dashboard", options=["Kanan Atas", "Kiri Atas", "Kanan Bawah", "Kiri Bawah"], group=g5)
+
+tblSize = input.string("Kecil", "Ukuran teks dashboard", options=["Sangat kecil", "Kecil", "Normal"], group=g5)
+
+showTrend = input.bool(true, "Tampilkan EMA", group=g5)
+
+showVWAP = input.bool(true, "Tampilkan VWAP", group=g5)
+
+colorTrendBars = input.bool(false, "Warnai candle sesuai tren EMA", group=g5)
+
+g7 = "Konfluensi sinyal"
+
+emaFastLen = input.int(21, "EMA cepat", minval=1, maxval=500, group=g7)
+
+emaSlowLen = input.int(50, "EMA lambat", minval=2, maxval=1000, group=g7)
+
+useTrendFilter = input.bool(false, "Wajib searah tren EMA", group=g7)
+
+useVWAPFilter = input.bool(false, "Wajib searah VWAP", group=g7)
+
+useRSIFilter = input.bool(false, "Wajib lolos filter RSI", group=g7)
+
+rsiLen = input.int(14, "RSI length", minval=2, maxval=500, group=g7)
+
+rsiLongMin = input.int(50, "RSI minimum BUY", minval=1, maxval=99, group=g7)
+
+rsiShortMax = input.int(50, "RSI maksimum SELL", minval=1, maxval=99, group=g7)
+
+g8 = "Alert"
+
+useDynamicAlert = input.bool(false, "Kirim alert() berisi harga/SL/TP", group=g8)
+
+// ================= WARNA =================
+
+cBal  = #ffd60a
+
+cInit = #00e5ff
+
+cAcc  = #7cfc00
+
+cTgt  = #b388ff
+
+cInv  = #ff4d6d
+
+cExc  = #ff9f1c
+
+cPOC  = #ffd60a
+
+cVAL  = #4da3ff
+
+cVA   = color.new(#4da3ff, 55)
+
+cOut  = color.new(#8a8f98, 70)
+
+cPrev = #c0c0c0
+
+cIB   = #00bcd4
+
+// ================= FUNGSI VOLUME PROFILE =================
+
+vpBuild(int startIdx, int endIdx, int nRows) =>
+
+    // Volume candle dibagi rata ke semua row yang dilewati; ini estimasi, bukan data tick.
+    float lo = 1e10
+
+    float hi = -1e10
+
+    for i = startIdx to endIdx
+
+        int off = bar_index - i
+
+        lo := math.min(lo, low[off])
+
+        hi := math.max(hi, high[off])
+
+    float stp = math.max((hi - lo) / nRows, syminfo.mintick)
+
+    array<float> vols = array.new_float(nRows, 0.0)
+
+    for i = startIdx to endIdx
+
+        int off = bar_index - i
+
+        float v = nz(volume[off])
+
+        if v <= 0
+
+            v := 1.0
+
+        int r0 = math.min(nRows - 1, int((low[off] - lo) / stp))
+
+        int r1 = math.min(nRows - 1, int((high[off] - lo) / stp))
+
+        float share = v / (r1 - r0 + 1)
+
+        for r = r0 to r1
+
+            array.set(vols, r, array.get(vols, r) + share)
+
+    [vols, lo, stp]
+
+vpStats(array<float> vols, float lo, float stp, float pct) =>
+
+    int n = array.size(vols)
+
+    float total = array.sum(vols)
+
+    int pocIdx = array.indexof(vols, array.max(vols))
+
+    float acc = array.get(vols, pocIdx)
+
+    int u = pocIdx
+
+    int d = pocIdx
+
+    while acc < total * pct / 100.0 and (u < n - 1 or d > 0)
+
+        float upV = u < n - 1 ? array.get(vols, u + 1) : -1.0
+
+        float dnV = d > 0 ? array.get(vols, d - 1) : -1.0
+
+        if upV >= dnV
+
+            u += 1
+
+            acc += upV
+
+        else
+
+            d -= 1
+
+            acc += dnV
+
+    [lo + (pocIdx + 0.5) * stp, lo + (u + 1) * stp, lo + d * stp]
+
+// ================= SERIES DASAR =================
+
+atr      = ta.atr(atrLen)
+
+volAvg   = ta.sma(volume, 20)
+
+emaFast = ta.ema(close, emaFastLen)
+
+emaSlow = ta.ema(close, emaSlowLen)
+
+sessionVwap = ta.vwap(hlc3)
+
+rsiValue = ta.rsi(close, rsiLen)
+
+hiW      = ta.highest(high, balLen)
+
+loW      = ta.lowest(low, balLen)
+
+lowestL  = ta.lowest(low, excLook)
+
+highestH = ta.highest(high, excLook)
+
+tight    = not na(atr) and bar_index >= balLen and (hiW - loW) <= balMaxATR * atr
+
+inSig    = not na(time(timeframe.period, sigSess, sigTz))
+
+trendLongOK = emaFast > emaSlow and close > emaSlow
+
+trendShortOK = emaFast < emaSlow and close < emaSlow
+
+vwapLongOK = not na(sessionVwap) and close > sessionVwap
+
+vwapShortOK = not na(sessionVwap) and close < sessionVwap
+
+rsiLongOK = rsiValue >= rsiLongMin
+
+rsiShortOK = rsiValue <= rsiShortMax
+
+plot(showTrend ? emaFast : na, "EMA cepat", color=color.new(cInit, 0), linewidth=2)
+
+plot(showTrend ? emaSlow : na, "EMA lambat", color=color.new(#ff6b6b, 0), linewidth=2)
+
+plot(showVWAP ? sessionVwap : na, "VWAP sesi", color=color.new(#ffffff, 0), linewidth=2)
+
+barcolor(colorTrendBars ? (trendLongOK ? color.new(cAcc, 65) : trendShortOK ? color.new(cInv, 65) : na) : na)
+
+// sesi harian
+
+var int   sessStart = 0
+
+var int   prevStart = na
+
+var float dayOpen   = na
+
+if timeframe.change("D")
+
+    prevStart := sessStart
+
+    sessStart := bar_index
+
+    dayOpen   := open
+
+// ================= STATE MACHINE BALANCE =================
+
+var int   phase  = 0      // 0 idle, 1 balance, 2 breakout (tunggu acceptance), 3 accepted
+
+var int   brkDir = 0
+
+var float bHi    = na
+
+var float bLo    = na
+
+var float edge   = na
+
+var float rngH   = na
+
+var float t1     = na
+
+var float t2     = na
+
+var float t3     = na
+
+var int   bStart = na
+
+var int   brkBar = na
+
+var int   cnt    = 0
+
+var bool  retestOK = false
+
+var bool  volOK    = false
+
+var bool  h1 = false
+
+var bool  h2 = false
+
+var bool  h3 = false
+
+var box   bBox  = na
+
+var line  lEdge = na
+
+var line  lT1   = na
+
+var line  lT2   = na
+
+var line  lT3   = na
+
+// tracker pullback & sinyal
+
+var float  runExt     = na
+
+var float  pbExt      = na
+
+var bool   pbArmed    = false
+
+var int    entriesN   = 0
+
+var int    lastSigBar = na
+
+var string lastSigTxt = "-"
+
+bool evBrk  = false
+
+bool evAcc  = false
+
+bool evFail = false
+
+int    sigDir = 0
+
+float  sigSL  = na
+
+string sigTag = ""
+
+bool   sigIsPB = false
+
+if barstate.isconfirmed and not na(atr)
+
+    bool inside = phase >= 2 and (brkDir == 1 ? close <= edge : close >= edge)
+
+    bool canNew = tight and (phase == 0 or (phase == 3 and bar_index - balLen + 1 > brkBar))
+
+    if inside
+
+        label.new(bar_index, brkDir == 1 ? high : low, phase == 2 ? "FAILED" : "INVALID", style = brkDir == 1 ? label.style_label_down : label.style_label_up, color = cInv, textcolor = color.white, size = size.small)
+
+        line.set_color(lEdge, color.gray)
+
+        line.set_color(lT1, color.gray)
+
+        line.set_color(lT2, color.gray)
+
+        line.set_color(lT3, color.gray)
+
+        evFail := true
+
+        phase  := 0
+
+        brkDir := 0
+
+    else if canNew
+
+        bHi    := hiW
+
+        bLo    := loW
+
+        bStart := bar_index - balLen + 1
+
+        brkDir := 0
+
+        phase  := 1
+
+        bBox := box.new(bStart, bHi, bar_index, bLo, xloc=xloc.bar_index, border_color=cBal, border_width=1, bgcolor=color.new(cBal, 88), text="BALANCE", text_color=cBal, text_size=size.small, text_halign=text.align_left, text_valign=text.align_top)
+
+    else if phase == 1
+
+        box.set_right(bBox, bar_index)
+
+        float buf = brkBuf * atr
+
+        bool isUp = close > bHi + buf
+
+        bool isDn = close < bLo - buf
+
+        if isUp or isDn
+
+            brkDir := isUp ? 1 : -1
+
+            edge   := isUp ? bHi : bLo
+
+            rngH   := bHi - bLo
+
+            brkBar := bar_index
+
+            cnt    := 1
+
+            retestOK := false
+
+            h1 := false
+
+            h2 := false
+
+            h3 := false
+
+            runExt   := isUp ? high : low
+
+            pbExt    := isUp ? high : low
+
+            pbArmed  := true
+
+            entriesN := 0
+
+            volOK := not na(volAvg) and volume >= volMult * volAvg
+
+            bool isInit = math.abs(close - open) >= initBody * atr and (not reqVol or volOK)
+
+            t1 := edge + brkDir * rngH * ext1
+
+            t2 := edge + brkDir * rngH * ext2
+
+            t3 := edge + brkDir * rngH * ext3
+
+            lEdge := line.new(bStart, edge, bar_index + extBars, edge, xloc=xloc.bar_index, color=cInv, style=line.style_dashed, width=2)
+
+            lT1   := line.new(bar_index, t1, bar_index + extBars, t1, xloc=xloc.bar_index, color=cTgt, style=line.style_dashed)
+
+            lT2   := line.new(bar_index, t2, bar_index + extBars, t2, xloc=xloc.bar_index, color=cTgt, style=line.style_dashed)
+
+            lT3   := line.new(bar_index, t3, bar_index + extBars, t3, xloc=xloc.bar_index, color=cTgt, style=line.style_dashed)
+
+            label.new(bar_index + extBars, t1, str.tostring(ext1, "#.#") + "x  " + str.tostring(t1, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cTgt, 85), textcolor=cTgt, size=size.small)
+
+            label.new(bar_index + extBars, t2, str.tostring(ext2, "#.#") + "x  " + str.tostring(t2, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cTgt, 85), textcolor=cTgt, size=size.small)
+
+            label.new(bar_index + extBars, t3, str.tostring(ext3, "#.#") + "x  " + str.tostring(t3, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cTgt, 85), textcolor=cTgt, size=size.small)
+
+            label.new(bar_index, isUp ? low : high, (isInit ? "INITIATIVE " : "BREAKOUT ") + (isUp ? "▲" : "▼"), style = isUp ? label.style_label_up : label.style_label_down, color = isInit ? cInit : color.gray, textcolor = color.black, size = size.small)
+
+            evBrk := true
+
+            phase := 2
+
+            if entryBrk and isInit
+
+                sigDir := brkDir
+
+                sigSL  := edge - brkDir * slBuf * atr
+
+                sigTag := "BREAKOUT"
+
+    else if phase >= 2
+
+        // retest di edge (dipakai untuk konfirmasi)
+
+        float tol = retestTol * atr
+
+        bool rt = brkDir == 1 ? (low <= edge + tol and close > edge) : (high >= edge - tol and close < edge)
+
+        if rt and bar_index > brkBar and not retestOK
+
+            retestOK := true
+
+            label.new(bar_index, brkDir == 1 ? low : high, "RETEST ✓", style = brkDir == 1 ? label.style_label_up : label.style_label_down, color = cAcc, textcolor = color.black, size = size.small)
+
+        if phase == 2
+
+            cnt += 1
+
+            if retestOK or cnt >= accBars
+
+                phase := 3
+
+                evAcc := true
+
+                label.new(bar_index, brkDir == 1 ? low : high, "ACCEPTED " + (brkDir == 1 ? "▲" : "▼"), style = brkDir == 1 ? label.style_label_up : label.style_label_down, color = cAcc, textcolor = color.black, size = size.small)
+
+        // target tersentuh
+
+        if not h1 and (brkDir == 1 ? high >= t1 : low <= t1)
+
+            h1 := true
+
+            label.new(bar_index, t1, str.tostring(ext1, "#.#") + "x ✓", style = brkDir == 1 ? label.style_label_down : label.style_label_up, color = color.new(cTgt, 30), textcolor = color.white, size = size.small)
+
+        if not h2 and (brkDir == 1 ? high >= t2 : low <= t2)
+
+            h2 := true
+
+            label.new(bar_index, t2, str.tostring(ext2, "#.#") + "x ✓", style = brkDir == 1 ? label.style_label_down : label.style_label_up, color = color.new(cTgt, 30), textcolor = color.white, size = size.small)
+
+        if not h3 and (brkDir == 1 ? high >= t3 : low <= t3)
+
+            h3 := true
+
+            label.new(bar_index, t3, str.tostring(ext3, "#.#") + "x ✓", style = brkDir == 1 ? label.style_label_down : label.style_label_up, color = color.new(cTgt, 30), textcolor = color.white, size = size.small)
+
+        // entry PULLBACK: koreksi dari ujung impuls + candle reversal
+
+        float imp    = math.abs(runExt - edge)
+
+        float pbNow  = brkDir == 1 ? math.min(pbExt, low) : math.max(pbExt, high)
+
+        float retr   = imp > 0 ? math.abs(runExt - pbNow) / imp : 0.0
+
+        bool  rev    = brkDir == 1 ? (close > open and close > high[1]) : (close < open and close < low[1])
+
+        float pbSL   = brkDir == 1 ? pbNow - slBuf * atr : pbNow + slBuf * atr
+
+        float pbRisk = math.abs(close - pbSL)
+
+        bool  sideOK = brkDir == 1 ? close > pbSL : close < pbSL
+
+        if entryPB and pbArmed and entriesN < maxEntries and rev and sideOK and retr >= pbMin and retr <= pbMax and pbRisk <= maxRiskATR * atr
+
+            sigDir  := brkDir
+
+            sigSL   := pbSL
+
+            sigTag  := "PULLBACK"
+
+            sigIsPB := true
+
+        // update tracker
+
+        if brkDir == 1
+
+            if high > runExt
+
+                runExt  := high
+
+                pbExt   := high
+
+                pbArmed := true
+
+            else
+
+                pbExt := pbNow
+
+        else
+
+            if low < runExt
+
+                runExt  := low
+
+                pbExt   := low
+
+                pbArmed := true
+
+            else
+
+                pbExt := pbNow
+
+// ================= EXCESS (TAIL) =================
+
+lowWick = math.min(open, close) - low
+
+upWick  = high - math.max(open, close)
+
+barRng  = high - low
+
+exLow  = showExc and barstate.isconfirmed and not na(atr) and lowWick >= excWickATR * atr and lowWick >= excWickPct * barRng and low <= lowestL
+
+exHigh = showExc and barstate.isconfirmed and not na(atr) and upWick >= excWickATR * atr and upWick >= excWickPct * barRng and high >= highestH
+
+plotshape(exLow, title="Excess Low", style=shape.triangleup, location=location.belowbar, color=cExc, size=size.small, text="EXC", textcolor=cExc)
+
+plotshape(exHigh, title="Excess High", style=shape.triangledown, location=location.abovebar, color=cExc, size=size.small, text="EXC", textcolor=cExc)
+
+// ================= SINYAL ENTRY =================
+
+if entryExc and sigDir == 0 and barstate.isconfirmed and not na(atr)
+
+    if exLow[1] and close > high[1]
+
+        sigDir := 1
+
+        sigSL  := low[1] - slBuf * atr
+
+        sigTag := "EXCESS REV"
+
+    else if exHigh[1] and close < low[1]
+
+        sigDir := -1
+
+        sigSL  := high[1] + slBuf * atr
+
+        sigTag := "EXCESS REV"
+
+bool buySig  = false
+
+bool sellSig = false
+
+if sigDir != 0 and barstate.isconfirmed and not na(atr) and not na(sigSL)
+
+    float entPx = close
+
+    float risk  = math.abs(entPx - sigSL)
+
+    bool okSide = sigDir == 1 ? sigSL < entPx : sigSL > entPx
+
+    bool okRisk = okSide and risk > 0 and risk <= maxRiskATR * atr
+
+    bool okSess = not useSess or inSig
+
+    bool okCool = na(lastSigBar) or bar_index - lastSigBar >= sigCool
+
+    bool okTrend = not useTrendFilter or (sigDir == 1 ? trendLongOK : trendShortOK)
+
+    bool okVWAP = not useVWAPFilter or (sigDir == 1 ? vwapLongOK : vwapShortOK)
+
+    bool okRSI = not useRSIFilter or (sigDir == 1 ? rsiLongOK : rsiShortOK)
+
+    if okRisk and okSess and okCool and okTrend and okVWAP and okRSI
+
+        float tp1 = entPx + sigDir * risk * rr1
+
+        float tp2 = entPx + sigDir * risk * rr2
+
+        bool isL = sigDir == 1
+
+        buySig  := isL
+
+        sellSig := not isL
+
+        lastSigBar := bar_index
+
+        lastSigTxt := (isL ? "BUY " : "SELL ") + sigTag + " @" + str.tostring(entPx, format.mintick) + "  SL " + str.tostring(sigSL, format.mintick)
+
+        if sigIsPB
+
+            pbArmed := false
+
+            entriesN += 1
+
+        line.new(bar_index, sigSL, bar_index + 20, sigSL, xloc=xloc.bar_index, color=cInv, width=2)
+
+        line.new(bar_index, tp1, bar_index + 20, tp1, xloc=xloc.bar_index, color=cAcc, style=line.style_dotted, width=2)
+
+        line.new(bar_index, tp2, bar_index + 20, tp2, xloc=xloc.bar_index, color=cAcc, style=line.style_dashed, width=2)
+
+        label.new(bar_index, isL ? low : high, (isL ? "BUY " : "SELL ") + sigTag + "\nSL " + str.tostring(sigSL, format.mintick) + "\nTP1 " + str.tostring(tp1, format.mintick) + "  TP2 " + str.tostring(tp2, format.mintick), style = isL ? label.style_label_up : label.style_label_down, color = isL ? cAcc : cInv, textcolor = isL ? color.black : color.white, size = size.normal)
+
+        if useDynamicAlert
+
+            alert("{\"signal\":\"" + (isL ? "BUY" : "SELL") + "\",\"type\":\"" + sigTag + "\",\"symbol\":\"" + syminfo.ticker + "\",\"timeframe\":\"" + timeframe.period + "\",\"price\":\"" + str.tostring(entPx, format.mintick) + "\",\"stop\":\"" + str.tostring(sigSL, format.mintick) + "\",\"tp1\":\"" + str.tostring(tp1, format.mintick) + "\",\"tp2\":\"" + str.tostring(tp2, format.mintick) + "\"}", alert.freq_once_per_bar_close)
+
+// ================= INITIAL BALANCE =================
+
+inIB = not na(time(timeframe.period, ibSess, ibTz))
+
+var float ibH = na
+
+var float ibL = na
+
+var int   ibStart = na
+
+var line  ibHL = na
+
+var line  ibLL = na
+
+var label ibLb = na
+
+if showIB
+
+    if inIB and not inIB[1]
+
+        ibH := high
+
+        ibL := low
+
+        ibStart := bar_index
+
+    else if inIB
+
+        ibH := math.max(ibH, high)
+
+        ibL := math.min(ibL, low)
+
+    else if inIB[1] and not na(ibStart)
+
+        if not na(ibHL)
+
+            line.delete(ibHL)
+
+            line.delete(ibLL)
+
+            label.delete(ibLb)
+
+        ibHL := line.new(ibStart, ibH, bar_index, ibH, xloc=xloc.bar_index, extend=extend.right, color=cIB, width=2)
+
+        ibLL := line.new(ibStart, ibL, bar_index, ibL, xloc=xloc.bar_index, extend=extend.right, color=cIB, width=2)
+
+        ibLb := label.new(bar_index, ibH, "IB " + str.tostring(ibL, format.mintick) + " - " + str.tostring(ibH, format.mintick) + " (" + str.tostring(ibH - ibL, format.mintick) + ")", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(cIB, 80), textcolor=cIB, size=size.small)
+
+// ================= VOLUME PROFILE (bar terakhir) =================
+
+var array<box>   vpBox = array.new<box>()
+
+var array<line>  vpLn  = array.new<line>()
+
+var array<label> vpLb  = array.new<label>()
+
+var float devPoc = na
+
+var float devVah = na
+
+var float devVal = na
+
+var float pPoc = na
+
+var float pVah = na
+
+var float pVal = na
+
+if barstate.islast and (showVP or showTbl)
+
+    while array.size(vpBox) > 0
+
+        box.delete(array.pop(vpBox))
+
+    while array.size(vpLn) > 0
+
+        line.delete(array.pop(vpLn))
+
+    while array.size(vpLb) > 0
+
+        label.delete(array.pop(vpLb))
+
+    bool sessMode = vpMode == "Session (Day)"
+
+    int curStart = sessMode ? sessStart : math.max(0, bar_index - vpLook + 1)
+
+    [vols, pLo, stp] = vpBuild(curStart, bar_index, vpRows)
+
+    [poc, vaH, vaL] = vpStats(vols, pLo, stp, vaPct)
+
+    devPoc := poc
+
+    devVah := vaH
+
+    devVal := vaL
+
+    pPoc := na
+
+    pVah := na
+
+    pVal := na
+
+    if not na(prevStart) and sessStart > prevStart
+
+        [pv, pl, ps] = vpBuild(prevStart, sessStart - 1, vpRows)
+
+        [pp, pvh, pvl] = vpStats(pv, pl, ps, vaPct)
+
+        pPoc := pp
+
+        pVah := pvh
+
+        pVal := pvl
+
+    if showVP
+
+        float maxV = array.max(vols)
+
+        int x0 = sessMode ? sessStart : bar_index + 5
+
+        int xr = bar_index + 25
+
+        for r = 0 to vpRows - 1
+
+            float v = array.get(vols, r)
+
+            int w = math.max(1, math.round(maxV > 0 ? v / maxV * vpWidth : 0.0))
+
+            float yb = pLo + r * stp
+
+            float yt = yb + stp
+
+            float mid = yb + stp / 2
+
+            bool isPoc = math.abs(mid - poc) < stp * 0.25
+
+            color col = isPoc ? color.new(cPOC, 15) : (mid >= vaL and mid <= vaH ? cVA : cOut)
+
+            array.push(vpBox, box.new(x0, yt, x0 + w, yb, xloc=xloc.bar_index, border_color=na, bgcolor=col))
+
+        array.push(vpLn, line.new(x0, poc, xr, poc, xloc=xloc.bar_index, color=cPOC, width=2))
+
+        array.push(vpLn, line.new(x0, vaH, xr, vaH, xloc=xloc.bar_index, color=cVAL, style=line.style_dashed))
+
+        array.push(vpLn, line.new(x0, vaL, xr, vaL, xloc=xloc.bar_index, color=cVAL, style=line.style_dashed))
+
+        array.push(vpLb, label.new(xr, poc, "POC " + str.tostring(poc, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cPOC, 80), textcolor=cPOC, size=size.small))
+
+        array.push(vpLb, label.new(xr, vaH, "VAH " + str.tostring(vaH, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cVAL, 80), textcolor=cVAL, size=size.small))
+
+        array.push(vpLb, label.new(xr, vaL, "VAL " + str.tostring(vaL, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cVAL, 80), textcolor=cVAL, size=size.small))
+
+        if showPrev and not na(pPoc)
+
+            array.push(vpLn, line.new(prevStart, pPoc, xr, pPoc, xloc=xloc.bar_index, color=cPrev, style=line.style_dotted, width=2))
+
+            array.push(vpLn, line.new(prevStart, pVah, xr, pVah, xloc=xloc.bar_index, color=cPrev, style=line.style_dotted))
+
+            array.push(vpLn, line.new(prevStart, pVal, xr, pVal, xloc=xloc.bar_index, color=cPrev, style=line.style_dotted))
+
+            array.push(vpLb, label.new(xr, pPoc, "yPOC " + str.tostring(pPoc, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cPrev, 85), textcolor=cPrev, size=size.small))
+
+            array.push(vpLb, label.new(xr, pVah, "yVAH " + str.tostring(pVah, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cPrev, 85), textcolor=cPrev, size=size.small))
+
+            array.push(vpLb, label.new(xr, pVal, "yVAL " + str.tostring(pVal, format.mintick), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(cPrev, 85), textcolor=cPrev, size=size.small))
+
+// ================= DASHBOARD =================
+
+var table tb = table.new(tblPos == "Kiri Atas" ? position.top_left : tblPos == "Kanan Bawah" ? position.bottom_right : tblPos == "Kiri Bawah" ? position.bottom_left : position.top_right, 2, 12, bgcolor=color.new(#101820, 8), frame_color=color.new(cInit, 55), frame_width=1, border_color=color.new(#667788, 75), border_width=1)
+
+if barstate.islast
+
+    if showTbl
+
+        string phTxt = phase == 0 ? "IDLE · menunggu balance" : phase == 1 ? "BALANCE · menunggu breakout" : phase == 2 ? (brkDir == 1 ? "BREAKOUT ▲ · menunggu acceptance" : "BREAKOUT ▼ · menunggu acceptance") : (brkDir == 1 ? "ACCEPTED ▲" : "ACCEPTED ▼")
+
+        string rngTxt = na(bHi) ? "-" : str.tostring(bLo, format.mintick) + " — " + str.tostring(bHi, format.mintick)
+
+        string tgtTxt = phase >= 2 ? str.tostring(t1, format.mintick) + " / " + str.tostring(t2, format.mintick) + " / " + str.tostring(t3, format.mintick) : "-"
+
+        string invTxt = phase >= 2 ? "Close kembali melewati " + str.tostring(edge, format.mintick) : "-"
+
+        bool c1 = phase == 3
+
+        bool c2 = retestOK
+
+        bool c3 = volOK
+
+        bool c4 = not na(devPoc) and not na(pPoc) and ((brkDir == 1 and devPoc > pPoc) or (brkDir == -1 and devPoc < pPoc))
+
+        int score = (c1 ? 1 : 0) + (c2 ? 1 : 0) + (c3 ? 1 : 0) + (c4 ? 1 : 0)
+
+        string cfTxt = phase >= 2 ? str.tostring(score) + "/4  ·  " + (c1 ? "✓" : "–") + " Accept  " + (c2 ? "✓" : "–") + " Retest  " + (c3 ? "✓" : "–") + " Vol  " + (c4 ? "✓" : "–") + " POC" : "-"
+
+        string opTxt = (na(dayOpen) or na(pVah) or na(pVal)) ? "-" : dayOpen > pVah ? "Di atas VAH sesi lalu" : dayOpen < pVal ? "Di bawah VAL sesi lalu" : "Di dalam value area sesi lalu"
+
+        string pxTxt = na(devVah) or na(devVal) ? "-" : close > devVah ? "Di atas value area" : close < devVal ? "Di bawah value area" : "Di dalam value area"
+
+        string trTxt = trendLongOK ? "Bullish · EMA cepat di atas" : trendShortOK ? "Bearish · EMA cepat di bawah" : "Netral"
+
+        string vwTxt = na(sessionVwap) ? "-" : vwapLongOK ? "Harga di atas VWAP" : vwapShortOK ? "Harga di bawah VWAP" : "Harga di VWAP"
+
+        string rsiTxt = na(rsiValue) ? "-" : str.tostring(rsiValue, "#.0") + (rsiValue >= 70 ? " · tinggi" : rsiValue <= 30 ? " · rendah" : " · netral")
+
+        color phaseCol = phase == 0 ? color.gray : phase == 1 ? cBal : phase == 2 ? cInit : cAcc
+
+        color rowA = color.new(#263746, 72)
+
+        color rowB = color.new(#182733, 50)
+
+        textSize = tblSize == "Sangat kecil" ? size.tiny : tblSize == "Normal" ? size.normal : size.small
+
+        table.cell(tb, 0, 0, "AMT  /  BALANCE + PROFILE", text_color=color.white, bgcolor=color.new(#15232e, 0), text_halign=text.align_left, text_size=textSize)
+
+        table.cell(tb, 1, 0, "LIVE", text_color=cInit, bgcolor=color.new(#15232e, 0), text_halign=text.align_right, text_size=textSize)
+
+        table.cell(tb, 0, 1, "STATUS", text_color=color.white, bgcolor=color.new(phaseCol, 72), text_halign=text.align_left, text_size=textSize)
+
+        table.cell(tb, 1, 1, phTxt, text_color=phaseCol, bgcolor=color.new(phaseCol, 82), text_halign=text.align_left, text_size=textSize)
+
+        array<string> keys = array.from("Balance range", "Target 1 / 2 / 3", "Invalidasi", "Konfirmasi", "EMA trend", "Session VWAP", "RSI", "Open vs VA lalu", "Harga vs VA", "Sinyal terakhir")
+
+        array<string> vals = array.from(rngTxt, tgtTxt, invTxt, cfTxt, trTxt, vwTxt, rsiTxt, opTxt, pxTxt, lastSigTxt)
+
+        for r = 0 to 9
+
+            color rowBg = r % 2 == 0 ? rowA : rowB
+
+            color valColor = r == 3 and phase >= 2 ? (score >= 3 ? cAcc : score >= 2 ? cBal : color.white) : r == 4 ? (trendLongOK ? cAcc : trendShortOK ? cInv : color.white) : r == 5 ? (vwapLongOK ? cAcc : vwapShortOK ? cInv : color.white) : r == 9 and lastSigTxt != "-" ? cInit : color.white
+
+            table.cell(tb, 0, r + 2, array.get(keys, r), text_color=color.new(color.white, 25), bgcolor=rowBg, text_halign=text.align_left, text_size=textSize)
+
+            table.cell(tb, 1, r + 2, array.get(vals, r), text_color=valColor, bgcolor=rowBg, text_halign=text.align_left, text_size=textSize)
+
+    else
+
+        table.clear(tb, 0, 0, 1, 11)
+
+// ================= ALERT =================
+
+alertcondition(evBrk, "AMT Breakout", "Breakout dari balance")
+
+alertcondition(evAcc, "AMT Acceptance", "Acceptance di luar balance")
+
+alertcondition(evFail, "AMT Failed/Invalid", "Breakout gagal / invalid")
+
+alertcondition(buySig, "AMT BUY", "Sinyal BUY - cek label untuk SL/TP")
+
+alertcondition(sellSig, "AMT SELL", "Sinyal SELL - cek label untuk SL/TP")
