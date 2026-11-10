@@ -33,6 +33,7 @@ button:focus-visible,input:focus-visible{outline:2px solid #38bda0;outline-offse
 .workspace.watchlist-hidden{grid-template-columns:minmax(0,1fr) 276px}
 .workspace.account-hidden{grid-template-columns:236px minmax(0,1fr)}
 .workspace.watchlist-hidden.account-hidden{grid-template-columns:minmax(0,1fr)}
+.tradingview-chart-host{position:absolute;inset:0}.tradingview-widget-container{height:100%;width:100%}.tradingview-widget-container__widget{height:calc(100% - 32px);width:100%}
 .watchlist-panel.closed,.account-panel.closed{display:none}
 .watchlist-panel{background:rgba(12,18,25,.34);backdrop-filter:blur(14px)}
 .analysis-panel{min-width:0;gap:12px;padding:15px 13px;background:rgba(12,18,25,.3);backdrop-filter:blur(14px)}

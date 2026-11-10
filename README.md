@@ -35,14 +35,16 @@ usage monitoring.
   it reconnects automatically while REST polling continues as a fallback. The
   server falls back to Binance's public market-data-only REST host if the primary
   API host is unavailable. No API key is needed.
-- The app uses TradingView Lightweight Charts to render its own candle data.
-  BTCUSD, ETHUSD, and SOLUSD receive live/history candles from Binance Spot.
-  XAUUSD candles are built from FxPro FIX midpoint quotes received since the
-  current connection; FIX does not provide candle history or traded volume.
-  EURUSD, AAPL, NVDA, and custom symbols use illustrative demo candles until a
-  data provider is configured. Copy the FIX price-connection settings from
-  cTrader into `.env.local` using the names in `.env.example`; use the SSL price
-  port, not the trading port.
+- Market charts are displayed with TradingView's Advanced Chart embed; Atlas
+  does not read candle data out of the embedded chart. BTCUSD, ETHUSD, and
+  SOLUSD technical analysis uses the separate Binance Spot API candle feed.
+  XAUUSD analysis uses midpoint candles built from FxPro FIX quotes received
+  during the current connection; indicators appear after the first candle and
+  Gemini requires 50 candles. FIX does not provide candle history or traded
+  volume. Analysis is disabled for
+  EURUSD, AAPL, NVDA, and custom symbols until a data source is selected.
+  Copy the FIX price-connection settings from cTrader into `.env.local` using
+  the names in `.env.example`; use the SSL price port, not the trading port.
   `FXPRO_FIX_XAUUSD_SYMBOL_ID` is the numeric instrument ID supplied by
   FxPro/Spotware, not the text `XAUUSD`. Keep the FIX password server-side and
   never use a `NEXT_PUBLIC_` prefix.
@@ -53,11 +55,12 @@ usage monitoring.
   that supports long-lived HTTP streams; serverless function time limits may
   interrupt the connection. Credentials are only read by the server. Protect a
   deployed app with access control; otherwise visitors could use its FIX feed.
-- Lightweight Charts is a chart-rendering library and does not provide market
-  data. Atlas calculates indicators from the same internal candle series shown
-  in its chart. XAUUSD indicators require at least 50 FIX candles collected
-  since connecting; historical backfill is unavailable. For other symbols
-  without a live Atlas feed, quotes and analysis use illustrative demo prices.
+- The TradingView embed is presentation-only; its chart feed is independent of
+  Atlas analysis data. Crypto indicators use Binance Spot API candles.
+  XAUUSD indicators use FIX candles collected since connecting, with limited
+  history until 50 candles are available; historical backfill is unavailable.
+  Atlas does not show calculated analysis for other instruments while their
+  data source is undecided.
 - FIX spot quotes do not provide traded volume or transaction-by-transaction
   bid/ask data. Volume profile, DOM depth, and footprint are unavailable for
   XAUUSD.
@@ -71,19 +74,20 @@ usage monitoring.
   is open. Optional browser notifications require permission.
 
 External data feeds can be unavailable or rate-limited; the UI reports
-market-data errors and distinguishes live feeds from demo instruments.
+market-data errors and distinguishes TradingView charts from Atlas analysis
+feeds.
 
 ## Paper-trading scope
 
-- Candlestick chart with timeframe controls, volume histogram, and EMA 20.
-- Searchable watchlist with live BTC/ETH/SOL and optional XAUUSD data; unsupported
-  instruments use illustrative demo prices.
+- TradingView Advanced Chart embed with interactive chart controls.
+- Searchable watchlist; Atlas quotes are shown only for the selected crypto
+  symbol when Binance data loads or for XAUUSD when FIX quotes are received.
 - Paper long/short positions, close-position P&L, and order history saved in
   browser local storage.
 - Responsive dashboard for account and simulated market overview.
 
-Paper trades are not real orders. Prices for unsupported symbols remain
-simulated. The FxPro FIX connection is read-only market data and does not route
-orders. A production trading app needs
+Paper trades are not real orders. Instruments without a connected Atlas quote
+may still use simulated prices for paper trading. The FxPro FIX connection is
+read-only market data and does not route orders. A production trading app needs
 licensed market data for every asset, secure authentication, a server-side
 account ledger, and a separately reviewed broker integration.

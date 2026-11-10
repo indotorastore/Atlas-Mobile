@@ -1,21 +1,10 @@
 "use client";
 
 import Image from "next/image";
-import {
-  CandlestickSeries,
-  ColorType,
-  createChart,
-  HistogramSeries,
-  LineSeries,
-  type IChartApi,
-  type ISeriesApi,
-  type UTCTimestamp,
-} from "lightweight-charts";
-import { DrawingManager, type DrawingKind } from "lightweight-charts-drawing";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type Candle = {
-  time: UTCTimestamp;
+  time: number;
   open: number;
   high: number;
   low: number;
@@ -81,13 +70,6 @@ const initialInstruments: Instrument[] = [
 
 const timeframeOptions = ["1m", "5m", "15m", "1H", "4H", "1D"] as const;
 type Timeframe = (typeof timeframeOptions)[number];
-const drawingTools: { label: string; kind: DrawingKind }[] = [
-  { label: "Trend line", kind: "trend-line" },
-  { label: "Horizontal line", kind: "horizontal-line" },
-  { label: "Horizontal ray", kind: "horizontal-ray" },
-  { label: "Fib retracement", kind: "fib-retracement" },
-  { label: "Rectangle", kind: "rectangle" },
-];
 const stepByTimeframe: Record<Timeframe, number> = {
   "1m": 60,
   "5m": 300,
@@ -97,42 +79,25 @@ const stepByTimeframe: Record<Timeframe, number> = {
   "1D": 86400,
 };
 const liveSymbols: Record<string, string> = { BTCUSD: "BTCUSDT", ETHUSD: "ETHUSDT", SOLUSD: "SOLUSDT" };
+const tradingViewIntervals: Record<Timeframe, string> = {
+  "1m": "1",
+  "5m": "5",
+  "15m": "15",
+  "1H": "60",
+  "4H": "240",
+  "1D": "D",
+};
+const tradingViewSymbols: Record<string, string> = {
+  BTCUSD: "BINANCE:BTCUSDT",
+  ETHUSD: "BINANCE:ETHUSDT",
+  EURUSD: "FX:EURUSD",
+  XAUUSD: "FX_IDC:XAUUSD",
+  AAPL: "NASDAQ:AAPL",
+  NVDA: "NASDAQ:NVDA",
+  SOLUSD: "BINANCE:SOLUSDT",
+};
 const money = (value: number, digits = 2) =>
   new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
-
-function makeCandles(instrument: Instrument, timeframe: Timeframe): Candle[] {
-  const data: Candle[] = [];
-  const now = Math.floor(Date.now() / 1000);
-  const step = stepByTimeframe[timeframe];
-  const seed = [...instrument.symbol].reduce((total, char) => total + char.charCodeAt(0), 0);
-  let close = instrument.price * (1 - instrument.changePct / 100 * 0.34);
-  for (let i = 119; i >= 0; i--) {
-    const index = 120 - i;
-    const wave = Math.sin((index + seed) * 0.21) * 0.0018 + Math.cos((index + seed) * 0.071) * 0.0012;
-    const drift = (index / 120 - 0.5) * instrument.changePct / 100 * 0.85;
-    const open = close;
-    close = open * (1 + wave + drift / 120);
-    const wick = instrument.price * (0.0006 + ((index * 7 + seed) % 9) * 0.00012);
-    data.push({
-      time: (Math.floor(now / step) * step - i * step) as UTCTimestamp,
-      open,
-      close,
-      high: Math.max(open, close) + wick * (0.55 + (index % 3) * 0.2),
-      low: Math.min(open, close) - wick * (0.5 + (index % 4) * 0.15),
-      volume: 50 + ((index * 97 + seed * 13) % 500) + Math.abs(wave) * 12000,
-    });
-  }
-  const last = data[data.length - 1];
-  const target = instrument.price;
-  const adjustment = target - last.close;
-  return data.map((candle, index) => ({
-    ...candle,
-    open: candle.open + adjustment * (index / (data.length - 1)),
-    close: candle.close + adjustment * (index / (data.length - 1)),
-    high: candle.high + adjustment * (index / (data.length - 1)),
-    low: candle.low + adjustment * (index / (data.length - 1)),
-  }));
-}
 
 function ema(values: number[], period: number): number[] {
   if (values.length === 0) return [];
@@ -143,6 +108,21 @@ function ema(values: number[], period: number): number[] {
 }
 
 function calculateAnalysis(candles: Candle[]): TechnicalAnalysis {
+  if (candles.length === 0) {
+    return {
+      ema20: 0,
+      ema50: 0,
+      rsi14: 50,
+      macd: 0,
+      macdSignal: 0,
+      macdHistogram: 0,
+      atr14: 0,
+      support: 0,
+      resistance: 0,
+      trend: "Neutral",
+      bias: "Neutral",
+    };
+  }
   const closes = candles.map((candle) => candle.close);
   const ema20Series = ema(closes, 20);
   const ema50Series = ema(closes, 50);
@@ -216,7 +196,7 @@ function findOrderBlocks(candles: Candle[]) {
     for (let prior = index - 1; prior >= Math.max(0, index - 4); prior--) {
       const candle = candles[prior];
       if ((bullish && candle.close < candle.open) || (!bullish && candle.close > candle.open)) {
-        blocks.push({ direction: bullish ? "Bullish" : "Bearish", low: candle.low, high: candle.high, time: candle.time as number });
+        blocks.push({ direction: bullish ? "Bullish" : "Bearish", low: candle.low, high: candle.high, time: candle.time });
         break;
       }
     }
@@ -236,159 +216,40 @@ function groupFootprintTrades(trades: MarketData["trades"], decimals: number) {
   return [...levels.values()].sort((a, b) => b.price - a.price).slice(0, 12);
 }
 
-function MarketChart({
-  candles,
-  showVolume,
-  showEma,
-  drawingTool,
-  symbol,
-  onChartReady,
-}: {
-  candles: Candle[];
-  showVolume: boolean;
-  showEma: boolean;
-  drawingTool: DrawingKind | null;
-  symbol: string;
-  onChartReady: (chart: IChartApi | null) => void;
-}) {
+function TradingViewChart({ symbol, timeframe }: { symbol: string; timeframe: Timeframe }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const emaRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const drawingManagerRef = useRef<DrawingManager | null>(null);
-  const restoringDrawingsRef = useRef(false);
-  const drawingSaveTimerRef = useRef<number | null>(null);
-  const initialChartRangeSetRef = useRef(false);
 
   useEffect(() => {
-    if (!containerRef.current) return;
-    initialChartRangeSetRef.current = false;
-    const chart = createChart(containerRef.current, {
-      autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: "#0b1017" },
-        textColor: "#7f8b9c",
-        fontFamily: "Arial, sans-serif",
-        fontSize: 11,
-        attributionLogo: true,
-      },
-      grid: {
-        vertLines: { color: "rgba(255,255,255,0.035)" },
-        horzLines: { color: "rgba(255,255,255,0.045)" },
-      },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.09)" },
-      timeScale: { borderColor: "rgba(255,255,255,0.09)", timeVisible: true, secondsVisible: false, barSpacing: 10, rightOffset: 4 },
-      crosshair: { vertLine: { color: "rgba(138,160,190,0.35)", labelBackgroundColor: "#202b39" }, horzLine: { color: "rgba(138,160,190,0.35)", labelBackgroundColor: "#202b39" } },
-      localization: { priceFormatter: (price: number) => price >= 100 ? price.toLocaleString("en-US", { maximumFractionDigits: 2 }) : price.toFixed(5) },
-    });
-    chartRef.current = chart;
-    onChartReady(chart);
-    const candlesSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#20c997",
-      downColor: "#f05b6b",
-      borderUpColor: "#20c997",
-      borderDownColor: "#f05b6b",
-      wickUpColor: "#20c997",
-      wickDownColor: "#f05b6b",
-      wickVisible: true,
-      borderVisible: true,
-      priceLineColor: "#8291a6",
-      priceLineStyle: 2,
-    });
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceScaleId: "volume",
-      priceFormat: { type: "volume" },
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-    chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.83, bottom: 0 } });
-    const emaSeries = chart.addSeries(LineSeries, {
-      color: "#d6a84f",
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-    seriesRef.current = candlesSeries;
-    volumeRef.current = volumeSeries;
-    emaRef.current = emaSeries;
-    const drawingManager = new DrawingManager(chart, candlesSeries, { magnet: "weak" });
-    drawingManagerRef.current = drawingManager;
-    const saveDrawings = () => {
-      if (drawingSaveTimerRef.current !== null) {
-        window.clearTimeout(drawingSaveTimerRef.current);
-        drawingSaveTimerRef.current = null;
-      }
-      if (!restoringDrawingsRef.current) {
-        localStorage.setItem(`marketdesk-drawings-${symbol}`, drawingManager.exportJSON());
-      }
-    };
-    const scheduleSave = () => {
-      if (restoringDrawingsRef.current) return;
-      if (drawingSaveTimerRef.current !== null) window.clearTimeout(drawingSaveTimerRef.current);
-      drawingSaveTimerRef.current = window.setTimeout(saveDrawings, 250);
-    };
-    const unsubscribeChange = drawingManager.on("change", scheduleSave);
-    const unsubscribeGestureEnd = drawingManager.on("gestureEnd", saveDrawings);
-    const savedDrawings = localStorage.getItem(`marketdesk-drawings-${symbol}`);
-    if (savedDrawings) {
-      restoringDrawingsRef.current = true;
-      try {
-        drawingManager.importJSON(savedDrawings);
-      } finally {
-        restoringDrawingsRef.current = false;
-      }
-    }
-    return () => {
-      if (drawingSaveTimerRef.current !== null) saveDrawings();
-      unsubscribeChange();
-      unsubscribeGestureEnd();
-      drawingManager.destroy();
-      drawingManagerRef.current = null;
-      onChartReady(null);
-      chart.remove();
-      chartRef.current = null;
-    };
-  }, [onChartReady, symbol]);
+    const container = containerRef.current;
+    if (!container) return;
 
-  useEffect(() => {
-    const candlesSeries = seriesRef.current;
-    const volumeSeries = volumeRef.current;
-    const emaSeries = emaRef.current;
-    if (!candlesSeries || !volumeSeries || !emaSeries || candles.length === 0) return;
-    candlesSeries.setData(candles.map((candle) => ({
-      time: candle.time,
-      open: candle.open,
-      high: candle.high,
-      low: candle.low,
-      close: candle.close,
-    })));
-    volumeSeries.setData(candles.map((candle) => ({
-      time: candle.time,
-      value: candle.volume,
-      color: candle.close >= candle.open ? "rgba(32,201,151,0.25)" : "rgba(240,91,107,0.25)",
-    })));
-    const emaValues = ema(candles.map((candle) => candle.close), 20);
-    emaSeries.setData(candles.map((candle, index) => index >= 19
-      ? { time: candle.time, value: emaValues[index] }
-      : null).filter((point): point is { time: UTCTimestamp; value: number } => point !== null));
-    volumeSeries.applyOptions({ visible: showVolume });
-    emaSeries.applyOptions({ visible: showEma });
-    if (!initialChartRangeSetRef.current) {
-      chartRef.current?.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, candles.length - 55),
-        to: candles.length + 4,
-      });
-      initialChartRangeSetRef.current = true;
-    }
-  }, [candles, showEma, showVolume]);
+    const widgetContainer = document.createElement("div");
+    widgetContainer.className = "tradingview-widget-container";
+    const widget = document.createElement("div");
+    widget.className = "tradingview-widget-container__widget";
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.textContent = JSON.stringify({
+      autosize: true,
+      symbol,
+      interval: tradingViewIntervals[timeframe],
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "en",
+      allow_symbol_change: false,
+      calendar: false,
+      support_host: "https://www.tradingview.com",
+    });
+    widgetContainer.append(widget, script);
+    container.replaceChildren(widgetContainer);
 
-  useEffect(() => {
-    drawingManagerRef.current?.setTool(drawingTool);
-  }, [drawingTool, symbol]);
+    return () => container.replaceChildren();
+  }, [symbol, timeframe]);
 
-  return <div className="chart-canvas" ref={containerRef} />;
+  return <div className="tradingview-chart-host" ref={containerRef} />;
 }
 
 function Icon({ name, size = 18 }: { name: string; size?: number }) {
@@ -416,9 +277,6 @@ export default function MarketApp() {
   const [search, setSearch] = useState("");
   const [showWatchlist, setShowWatchlist] = useState(true);
   const [showAccount, setShowAccount] = useState(true);
-  const [showVolume, setShowVolume] = useState(true);
-  const [showEma, setShowEma] = useState(true);
-  const [drawingTool, setDrawingTool] = useState<DrawingKind | null>(null);
   const [geminiAnalysis, setGeminiAnalysis] = useState("");
   const [geminiError, setGeminiError] = useState("");
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
@@ -436,37 +294,43 @@ export default function MarketApp() {
   const [alertTarget, setAlertTarget] = useState("");
   const [alertDirection, setAlertDirection] = useState<PriceAlert["direction"]>("above");
   const [marketPanel, setMarketPanel] = useState<"order-block" | "dom" | "profile" | "footprint">("dom");
-  const chartApiRef = useRef<IChartApi | null>(null);
   const geminiRequestIdRef = useRef(0);
   const liveBaselineRef = useRef(0);
   const fxProReferencePriceRef = useRef<number | null>(null);
   const instrument = instruments.find((item) => item.symbol === activeSymbol) ?? instruments[0];
   const activeMarketData = marketData?.symbol === activeSymbol && marketData.timeframe === timeframe ? marketData : null;
-  const candles = useMemo(
-    () => activeSymbol === "XAUUSD"
-      ? fxProCandles
-      : activeMarketData?.candles ?? makeCandles(instrument, timeframe),
-    [activeMarketData, activeSymbol, fxProCandles, instrument, timeframe],
+  const analysisCandles = useMemo(
+    () => activeSymbol === "XAUUSD" ? fxProCandles : activeMarketData?.candles ?? [],
+    [activeMarketData, activeSymbol, fxProCandles],
   );
-  const analysis = useMemo(() => calculateAnalysis(candles), [candles]);
-  const volumeProfile = useMemo(() => calculateVolumeProfile(candles), [candles]);
-  const orderBlocks = useMemo(() => findOrderBlocks(candles), [candles]);
+  const analysis = useMemo(() => calculateAnalysis(analysisCandles), [analysisCandles]);
+  const volumeProfile = useMemo(() => calculateVolumeProfile(analysisCandles), [analysisCandles]);
+  const orderBlocks = useMemo(() => findOrderBlocks(analysisCandles), [analysisCandles]);
   const footprint = useMemo(
     () => groupFootprintTrades(activeMarketData?.trades ?? [], instrument.decimals),
     [activeMarketData, instrument.decimals],
   );
+  const tradingViewSymbol = tradingViewSymbols[activeSymbol] ?? activeSymbol;
+  const isAnalysisInstrument = Boolean(liveSymbols[activeSymbol]) || activeSymbol === "XAUUSD";
   const isBinanceLive = Boolean(activeMarketData && liveSymbols[activeSymbol] && liveConnection === "live" && lastTickAt !== null);
   const isFxProLive = activeSymbol === "XAUUSD" && liveConnection === "live" && lastTickAt !== null;
+  const isXauAnalysisAvailable = isFxProLive && fxProCandles.length > 0;
   const isXauAnalysisReady = isFxProLive && fxProCandles.length >= 50;
+  const isGeminiAnalysisReady = Boolean(
+    liveSymbols[activeSymbol]
+      ? activeMarketData && activeMarketData.candles.length >= 50
+      : activeSymbol === "XAUUSD" && isXauAnalysisReady,
+  );
+  const isAnalysisDataReady = Boolean(
+    liveSymbols[activeSymbol]
+      ? activeMarketData && activeMarketData.candles.length >= 50
+      : activeSymbol === "XAUUSD" && isXauAnalysisAvailable,
+  );
   const profilePeak = Math.max(1, ...volumeProfile.map((level) => level.volume));
   const currentAlerts = alerts.filter((alert) => alert.symbol === activeSymbol);
   const filteredInstruments = instruments.filter((item) =>
     `${item.symbol} ${item.name}`.toLowerCase().includes(search.toLowerCase()),
   );
-  const onChartReady = useCallback((chart: IChartApi | null) => {
-    chartApiRef.current = chart;
-  }, []);
-
   useEffect(() => {
     if (window.matchMedia("(max-width: 760px)").matches) setShowWatchlist(false);
   }, []);
@@ -605,8 +469,8 @@ export default function MarketApp() {
         setFxProCandles((current) => {
           const bucket = Math.floor(tickTime / 1_000 / stepByTimeframe[timeframe]) * stepByTimeframe[timeframe];
           const last = current[current.length - 1];
-          if (last && bucket < (last.time as number)) return current;
-          if (last && bucket === (last.time as number)) {
+          if (last && bucket < last.time) return current;
+          if (last && bucket === last.time) {
             return [...current.slice(0, -1), {
               ...last,
               high: Math.max(last.high, price),
@@ -616,7 +480,7 @@ export default function MarketApp() {
           }
           const open = price;
           return [...current, {
-            time: bucket as UTCTimestamp,
+            time: bucket,
             open,
             high: Math.max(open, price),
             low: Math.min(open, price),
@@ -709,8 +573,8 @@ export default function MarketApp() {
             const last = candles[candles.length - 1];
             if (!last) return current;
             const tradeTime = Math.floor(latestTrade.time / 1000 / stepByTimeframe[timeframe]) * stepByTimeframe[timeframe];
-            if (tradeTime < (last.time as number)) return { ...current, currentPrice: latestTrade.price };
-            if (tradeTime === (last.time as number)) {
+            if (tradeTime < last.time) return { ...current, currentPrice: latestTrade.price };
+            if (tradeTime === last.time) {
               candles[candles.length - 1] = {
                 ...last,
                 high: Math.max(last.high, latestTrade.price),
@@ -720,7 +584,7 @@ export default function MarketApp() {
               };
             } else {
               candles.push({
-                time: tradeTime as UTCTimestamp,
+                time: tradeTime,
                 open: last.close,
                 high: Math.max(last.close, latestTrade.price),
                 low: Math.min(last.close, latestTrade.price),
@@ -841,6 +705,7 @@ export default function MarketApp() {
   }, [activeSymbol, timeframe]);
 
   const requestGeminiAnalysis = async () => {
+    if (!isGeminiAnalysisReady) return;
     const requestId = ++geminiRequestIdRef.current;
     setIsGeminiLoading(true);
     setGeminiError("");
@@ -923,7 +788,7 @@ export default function MarketApp() {
           <span>ATLAS</span>
           <span className="brand-tag">MARKET INTELLIGENCE</span>
         </a>
-        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> {isBinanceLive ? "BINANCE SPOT · LIVE" : isFxProLive ? "FXPRO FIX XAUUSD · LIVE" : liveSymbols[activeSymbol] ? "BINANCE SPOT · CONNECTING" : activeSymbol === "XAUUSD" ? `FXPRO FIX · ${liveConnection.toUpperCase()}` : "DEMO DATA"}</div>
+        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> TRADINGVIEW · {tradingViewSymbol} <span className="topbar-divider">/</span> {liveSymbols[activeSymbol] ? "BINANCE ANALYSIS" : activeSymbol === "XAUUSD" ? `XAUUSD ANALYSIS · ${liveConnection.toUpperCase()}` : "ANALYSIS DISABLED"}</div>
         <div className="topbar-actions">
           <button className="icon-button" aria-label="Notifications"><Icon name="bell" /></button>
           <button className="icon-button" aria-label="Settings"><Icon name="settings" /></button>
@@ -943,60 +808,57 @@ export default function MarketApp() {
               <button key={item.symbol} className={`watch-item ${activeSymbol === item.symbol ? "selected" : ""}`} onClick={() => setActiveSymbol(item.symbol)}>
                 <span className="instrument-icon">{item.symbol.slice(0, 1)}</span>
                 <span className="watch-instrument"><strong>{item.symbol}</strong><small>{item.name}</small></span>
-                <span className="watch-price"><strong>{item.price < 10 ? item.price.toFixed(item.decimals) : money(item.price, item.decimals)}</strong><small className={item.changePct >= 0 ? "positive" : "negative"}>{item.changePct >= 0 ? "+" : ""}{item.changePct.toFixed(2)}%</small></span>
+                <span className="watch-price"><strong>{item.symbol === activeSymbol && (activeMarketData || isFxProLive) ? item.price < 10 ? item.price.toFixed(item.decimals) : money(item.price, item.decimals) : "—"}</strong><small>{item.symbol === activeSymbol && (activeMarketData || isFxProLive) ? <span className={item.changePct >= 0 ? "positive" : "negative"}>{item.changePct >= 0 ? "+" : ""}{item.changePct.toFixed(2)}%</span> : "No Atlas quote"}</small></span>
               </button>
             ))}
             {filteredInstruments.length === 0 && <div className="empty-search"><span>No matching markets</span><button onClick={addInstrument}><Icon name="plus" size={14} /> Add demo symbol</button></div>}
           </div>
-          <div className="watchlist-footer"><span className="live-dot" /> Lightweight Charts · Binance / FIX / demo data</div>
+          <div className="watchlist-footer"><span className="live-dot" /> TradingView chart · Atlas analysis: Binance / XAUUSD FIX</div>
         </aside>
 
         <section className="main-workspace">
           <div className="instrument-header">
             <div className="instrument-title">
               <div className="instrument-avatar">{instrument.symbol.slice(0, 1)}</div>
-              <div><div className="symbol-name">{instrument.symbol}<span className="market-type">{activeMarketData ? " · BINANCE SPOT" : isFxProLive ? " · FXPRO FIX" : " · DEMO"}</span></div><div className="instrument-fullname">{instrument.name}</div></div>
+              <div><div className="symbol-name">{instrument.symbol}<span className="market-type"> · TRADINGVIEW</span></div><div className="instrument-fullname">{instrument.name}</div></div>
               <button className="star-button" aria-label="Favorite">☆</button>
             </div>
-            <div className="instrument-quote"><strong>{money(instrument.price, instrument.decimals)}</strong><span className={instrument.changePct >= 0 ? "positive" : "negative"}>{instrument.change >= 0 ? "+" : ""}{money(instrument.change, instrument.decimals)} ({instrument.changePct >= 0 ? "+" : ""}{instrument.changePct.toFixed(2)}%)</span>{isFxProLive && <small className="last-tick">Change since first quote</small>}</div>
-            <div className="session-stat"><span>CHART DATA</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {isBinanceLive ? "Binance Spot · live" : activeMarketData ? "Binance Spot · history loaded" : isFxProLive ? "FxPro FIX · live" : activeSymbol === "XAUUSD" ? `FxPro FIX · ${liveConnection}` : "Illustrative demo"}</strong>{isFxProLive && fxProQuote ? <small className="last-tick">FIX bid {money(fxProQuote.bid, instrument.decimals)} · ask {money(fxProQuote.ask, instrument.decimals)}</small> : isBinanceLive ? <small className="last-tick">Live trade · {new Date(lastTickAt!).toLocaleTimeString()}</small> : activeMarketData ? <small className="last-tick">Waiting for live trade tick</small> : activeSymbol === "XAUUSD" && !isFxProLive ? <small className="last-tick">Quote appears after first FIX update</small> : null}</div>
+            <div className="instrument-quote">{activeMarketData || isFxProLive ? <><strong>{money(instrument.price, instrument.decimals)}</strong><span className={instrument.changePct >= 0 ? "positive" : "negative"}>{instrument.change >= 0 ? "+" : ""}{money(instrument.change, instrument.decimals)} ({instrument.changePct >= 0 ? "+" : ""}{instrument.changePct.toFixed(2)}%)</span>{isFxProLive && <small className="last-tick">Change since first quote</small>}</> : <strong>—</strong>}</div>
+            <div className="session-stat"><span>CHART / ANALYSIS</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> TradingView · {tradingViewSymbol}</strong>{liveSymbols[activeSymbol] ? <small className="last-tick">Analysis: Binance Spot API · {isBinanceLive ? "live" : activeMarketData ? "historical data" : "loading"}</small> : activeSymbol === "XAUUSD" ? <small className="last-tick">Analysis: FxPro FIX quotes · {isFxProLive ? "live" : liveConnection}</small> : <small className="last-tick">Analysis disabled · data source to be decided</small>}</div>
           </div>
 
           <div className="chart-toolbar">
             <div className="timeframes">{timeframeOptions.map((option) => <button key={option} className={timeframe === option ? "active" : ""} onClick={() => setTimeframe(option)}>{option}</button>)}</div>
-            <>
-              <div className="toolbar-separator" />
-              <button className={`tool-button ${showEma ? "tool-active" : ""}`} onClick={() => setShowEma(!showEma)}><span className="ema-icon">∿</span> EMA 20</button>
-              <button className={`tool-button ${showVolume ? "tool-active" : ""}`} onClick={() => setShowVolume(!showVolume)} disabled={activeSymbol === "XAUUSD"} title={activeSymbol === "XAUUSD" ? "FxPro FIX quotes do not include traded volume" : undefined}><span className="volume-icon">▥</span> Volume</button>
-              <label className="drawing-select"><span>DRAW</span><select aria-label="Chart drawing tool" value={drawingTool ?? ""} onChange={(event) => setDrawingTool(drawingTools.find((tool) => tool.kind === event.target.value)?.kind ?? null)}><option value="">Off</option>{drawingTools.map((tool) => <option key={tool.kind} value={tool.kind}>{tool.label}</option>)}</select></label>
-            </>
-            <div className="toolbar-spacer" />
-            <button className="icon-button chart-action" onClick={() => chartApiRef.current?.timeScale().fitContent()} aria-label="Fit chart"><Icon name="eye" size={16} /></button>
-            <span className="chart-currency">USD ▾</span>
+            <span className="toolbar-spacer" />
+            <span className="chart-currency">Chart by TradingView</span>
           </div>
 
           <div className="chart-container">
-            <div className="chart-watermark"><span>◈</span> {instrument.symbol}<small> · {timeframe}</small></div>
-            <MarketChart candles={candles} showVolume={showVolume && activeSymbol !== "XAUUSD"} showEma={showEma} drawingTool={drawingTool} symbol={instrument.symbol} onChartReady={onChartReady} />
+            <TradingViewChart symbol={tradingViewSymbol} timeframe={timeframe} />
           </div>
 
-          <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span>{showEma && <span><i className="legend-line" /> EMA 20</span>}<span className="legend-demo">{isBinanceLive ? `Binance Spot · live candles · ${new Date(lastTickAt!).toLocaleTimeString()}` : activeMarketData ? "Binance Spot · historical candles · waiting for live trade" : isFxProLive ? "FxPro FIX · candles accumulated since connection; no historical backfill" : activeSymbol === "XAUUSD" ? `Waiting for FxPro FIX · ${fxProCandles.length ? "candles since connection" : "no XAUUSD candles yet"}` : "Illustrative demo candles · not live market data"}</span></div>
+          <div className="chart-legend"><span>Chart: TradingView · {tradingViewSymbol}</span><span className="legend-demo">{liveSymbols[activeSymbol] ? `Analysis: Binance API · ${isBinanceLive ? "live candle updates" : activeMarketData ? "historical candles loaded" : "loading data"}` : activeSymbol === "XAUUSD" ? `Analysis: FxPro FIX · ${fxProCandles.length} candles collected since connection` : "Analysis disabled for this pair; data source will be decided later"}</span></div>
 
           <section className="analysis-table-panel">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">TECHNICAL SUMMARY</span><h2>Indicator dashboard</h2></div>
               <div className="analysis-heading-actions">
                 <span className="analysis-timeframe">{timeframe} · {instrument.symbol}</span>
-                <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || (activeSymbol === "XAUUSD" && !isXauAnalysisReady)} title={activeSymbol === "XAUUSD" && !isXauAnalysisReady ? "Kumpulkan sedikitnya 50 candle dari kuotasi FIX sebelum analisis" : undefined}>
+                <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || !isGeminiAnalysisReady} title={!isGeminiAnalysisReady ? "Gemini aktif setelah data Binance atau 50 candle FIX XAUUSD tersedia" : undefined}>
                   {isGeminiLoading ? "Menganalisis..." : "✦ Analisis Gemini"}
                 </button>
               </div>
             </div>
-            {activeSymbol === "XAUUSD" && !isXauAnalysisReady
-              ? <p className="tool-disclaimer">{fxProCandles.length < 50 ? `Indikator dan analisis Gemini aktif setelah terkumpul 50 candle FIX. Terkumpul ${fxProCandles.length}/50. Tidak ada histori candle sebelum koneksi.` : "Menunggu kuotasi FxPro FIX live."}</p>
-              : <>
-              {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">Indikator dihitung hanya dari candle midpoint FxPro FIX sejak koneksi aktif; tidak ada backfill candle historis.</p>}
-              {activeSymbol !== "XAUUSD" && !activeMarketData && <p className="tool-disclaimer">Indikator memakai candle ilustratif, bukan data live.</p>}
+            {!isAnalysisInstrument
+              ? <p className="tool-disclaimer">Analisis untuk {instrument.symbol} belum diaktifkan. Saat ini analisis hanya tersedia untuk BTCUSD, ETHUSD, SOLUSD dari Binance dan XAUUSD dari kuotasi FIX.</p>
+              : !isAnalysisDataReady
+                ? <p className="tool-disclaimer">{activeSymbol === "XAUUSD"
+                  ? `Menunggu kuotasi FIX. Indikator awal tersedia setelah candle pertama; Gemini memerlukan 50 candle. Terkumpul ${fxProCandles.length}/50; histori sebelum koneksi tidak tersedia.`
+                  : marketDataError || "Menunggu histori candle Binance Spot untuk analisis."}</p>
+                : <>
+              {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">Indikator dihitung dari candle midpoint FxPro FIX yang terkumpul sejak koneksi aktif; tidak ada backfill histori.</p>}
+              {activeSymbol === "XAUUSD" && !isXauAnalysisReady && <p className="tool-disclaimer">Analisis XAUUSD masih terbatas: {fxProCandles.length}/50 candle. Gemini aktif setelah 50 candle terkumpul.</p>}
+              {liveSymbols[activeSymbol] && <p className="tool-disclaimer">Indikator dan analisis Gemini menggunakan candle Binance Spot API; chart TradingView adalah tampilan terpisah.</p>}
               <div className="indicator-grid">
               <div className="indicator-cell"><span>RSI · 14</span><strong className={analysis.rsi14 >= 70 ? "negative" : analysis.rsi14 <= 30 ? "positive" : ""}>{analysis.rsi14.toFixed(1)}</strong><small>{analysis.rsi14 >= 70 ? "Overbought zone" : analysis.rsi14 <= 30 ? "Oversold zone" : "Neutral momentum"}</small></div>
               <div className="indicator-cell"><span>MACD · 12/26/9</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "+" : ""}{money(analysis.macdHistogram, instrument.decimals)}</strong><small>{analysis.macdHistogram >= 0 ? "Positive momentum" : "Negative momentum"}</small></div>
@@ -1012,7 +874,7 @@ export default function MarketApp() {
                 {isGeminiLoading && <p>Gemini sedang membaca indikator teknikal...</p>}
                 {geminiAnalysis && <p>{geminiAnalysis}</p>}
                 {geminiError && <p>{geminiError}</p>}
-                <small>Analisis AI memakai candle dari feed Atlas yang ditampilkan di chart; pair demo memakai data ilustratif. Bukan nasihat keuangan.</small>
+                <small>Analisis AI memakai data analisis Atlas yang terpisah dari chart TradingView. Bukan nasihat keuangan.</small>
               </div>
             )}
           </section>
@@ -1020,9 +882,12 @@ export default function MarketApp() {
           <section className="market-tools-panel">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">MARKET MICROSTRUCTURE</span><h2>Order flow &amp; volume tools</h2></div>
-              <span className="analysis-timeframe">{isBinanceLive ? "Binance Spot · live" : activeMarketData ? "Binance Spot · REST" : isFxProLive ? "FxPro FIX · live quotes" : activeSymbol === "XAUUSD" ? "FxPro FIX · waiting for quotes" : `${instrument.symbol} · demo candles`}</span>
+              <span className="analysis-timeframe">{liveSymbols[activeSymbol] ? "Binance Spot API" : activeSymbol === "XAUUSD" ? "FxPro FIX" : "Analysis disabled"}</span>
             </div>
             {marketDataError && <p className="data-error" role="status">{marketDataError}</p>}
+            {!isAnalysisInstrument
+              ? <p className="data-empty">Market analysis is not enabled for {instrument.symbol}. Only Binance crypto pairs and XAUUSD are currently supported.</p>
+              : <>
             <div className="market-tool-tabs" role="tablist" aria-label="Market analysis tools">
               {([
                 ["dom", "DOM"],
@@ -1063,6 +928,7 @@ export default function MarketApp() {
               </>
             )}
             {marketPanel === "footprint" && !activeMarketData && <p className="data-empty">{activeSymbol === "XAUUSD" ? "FxPro FIX spot quotes tidak menyediakan transaksi bid/ask untuk footprint." : "Footprint memerlukan data transaksi live; tersedia untuk BTCUSD, ETHUSD, dan SOLUSD."}</p>}
+              </>}
           </section>
 
           <section className="alerts-panel">
@@ -1090,15 +956,34 @@ export default function MarketApp() {
         </section>
 
         <aside id="account-sidebar" className={`account-panel analysis-panel ${showAccount ? "" : "closed"}`}>
-          {activeSymbol === "XAUUSD" ? (
+          {!isAnalysisInstrument ? (
+            <section className="analysis-card xau-data-note">
+              <div className="side-heading"><div><span className="eyebrow">ANALYSIS STATUS</span><h3>{instrument.symbol}</h3></div></div>
+              <p>TradingView provides the chart. Atlas analysis is currently enabled only for Binance crypto pairs and XAUUSD.</p>
+              <small>The data source for analysis of other instruments has not been selected.</small>
+            </section>
+          ) : activeSymbol === "XAUUSD" && !isAnalysisDataReady ? (
             <section className="analysis-card xau-data-note">
               <div className="side-heading"><div><span className="eyebrow">XAUUSD DATA</span><h3>FxPro FIX</h3></div></div>
-              <p>Chart and analysis use midpoint candles built from FxPro FIX quotes received while this session is connected.</p>
+              <p>Chart: TradingView embed. Analysis uses midpoint candles built from live FxPro FIX quotes received in this session.</p>
               {fxProQuote && <div className="analysis-row"><span>FxPro FIX midpoint</span><strong>{money((fxProQuote.bid + fxProQuote.ask) / 2, instrument.decimals)}</strong></div>}
               <div className="analysis-row"><span>Candles this session</span><strong>{fxProCandles.length}</strong></div>
-              <small>FIX does not provide candle history or traded volume. Candles before this connection are unavailable.</small>
+              <small>FIX has no candle history or traded volume. Indicators appear after the first quote; Gemini requires 50 candles. Earlier data is unavailable.</small>
+            </section>
+          ) : !isAnalysisDataReady ? (
+            <section className="analysis-card xau-data-note">
+              <div className="side-heading"><div><span className="eyebrow">BINANCE ANALYSIS</span><h3>{instrument.symbol}</h3></div></div>
+              <p>Technical analysis will appear after Binance Spot API candles load.</p>
+              {marketDataError && <p className="data-error" role="status">{marketDataError}</p>}
             </section>
           ) : <>
+          {activeSymbol === "XAUUSD" && <section className="analysis-card xau-data-note">
+            <div className="side-heading"><div><span className="eyebrow">XAUUSD DATA</span><h3>FxPro FIX</h3></div></div>
+            <p>Chart: TradingView embed. Analysis uses midpoint candles built from live FxPro FIX quotes received in this session.</p>
+            {fxProQuote && <div className="analysis-row"><span>FxPro FIX midpoint</span><strong>{money((fxProQuote.bid + fxProQuote.ask) / 2, instrument.decimals)}</strong></div>}
+            <div className="analysis-row"><span>Candles this session</span><strong>{fxProCandles.length}</strong></div>
+            <small>FIX has no candle history or traded volume. Candles before this connection are unavailable.</small>
+          </section>}
           <section className="signal-card">
             <div className="side-heading"><div><span className="eyebrow">TECHNICAL OUTLOOK</span><h3>{instrument.symbol}</h3></div><span className={`signal-pill ${analysis.bias.toLowerCase()}`}>{analysis.bias}</span></div>
             <p>{analysis.bias === "Bullish" ? "Momentum and trend indicators are aligned positively." : analysis.bias === "Bearish" ? "Momentum and trend indicators are aligned negatively." : "Trend and momentum indicators show mixed conditions."}</p>
@@ -1119,12 +1004,12 @@ export default function MarketApp() {
             <div className="level-row"><span>Support</span><strong className="positive">{money(analysis.support, instrument.decimals)}</strong></div>
             <div className="analysis-row"><span>ATR (14)</span><strong>{money(analysis.atr14, instrument.decimals)}</strong></div>
           </section>
-          <p className="analysis-disclaimer">Atlas indicators use separate internal data, which may be live or illustrative depending on the instrument. They may differ from the TradingView chart and are not financial advice.</p>
+          <p className="analysis-disclaimer">Crypto indicators use Binance Spot API candles. They are separate from the TradingView chart feed and are not financial advice.</p>
           </>}
         </aside>
       </div>
 
-      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {isBinanceLive ? "Binance Spot" : isFxProLive ? "FxPro FIX" : "Atlas illustrative data"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a><span>© 2025 TradingView, Inc.</span><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
+      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {isBinanceLive ? "Binance Spot" : isFxProLive ? "FxPro FIX" : "TradingView chart"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Chart by TradingView</a><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
     </main>
   );
 }
