@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Marketdesk — Trading Simulator",
-  description: "A market charting and paper-trading workspace.",
+  title: "Atlas — Market Intelligence",
+  description: "Atlas market intelligence workspace untuk analisis chart dan pasar.",
+  applicationName: "Atlas Market Intelligence",
+  icons: {
+    icon: "/icon.svg",
+    shortcut: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -12,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="id">
       <body>{children}</body>
     </html>
   );
