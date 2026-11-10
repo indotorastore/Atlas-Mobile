@@ -236,6 +236,51 @@ function groupFootprintTrades(trades: MarketData["trades"], decimals: number) {
   return [...levels.values()].sort((a, b) => b.price - a.price).slice(0, 12);
 }
 
+const tradingViewIntervals: Record<Timeframe, string> = {
+  "1m": "1",
+  "5m": "5",
+  "15m": "15",
+  "1H": "60",
+  "4H": "240",
+  "1D": "D",
+};
+
+function TradingViewChart({ timeframe }: { timeframe: Timeframe }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const widgetContainer = document.createElement("div");
+    widgetContainer.className = "tradingview-widget-container";
+    const widget = document.createElement("div");
+    widget.className = "tradingview-widget-container__widget";
+    const script = document.createElement("script");
+    script.type = "text/javascript";
+    script.async = true;
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.textContent = JSON.stringify({
+      autosize: true,
+      symbol: "FX_IDC:XAUUSD",
+      interval: tradingViewIntervals[timeframe],
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "en",
+      allow_symbol_change: false,
+      calendar: false,
+      support_host: "https://www.tradingview.com",
+    });
+    widgetContainer.append(widget, script);
+    container.replaceChildren(widgetContainer);
+
+    return () => container.replaceChildren();
+  }, [timeframe]);
+
+  return <div className="tradingview-chart-host" ref={containerRef} />;
+}
+
 function MarketChart({
   candles,
   showVolume,
@@ -424,8 +469,6 @@ export default function MarketApp() {
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [fxProCandles, setFxProCandles] = useState<Candle[]>([]);
-  const [xauHistoryError, setXauHistoryError] = useState("");
-  const [isXauHistoryLoading, setIsXauHistoryLoading] = useState(false);
   const [marketDataError, setMarketDataError] = useState("");
   const [isMarketDataLoading, setIsMarketDataLoading] = useState(false);
   const [liveConnection, setLiveConnection] = useState<"connecting" | "live" | "reconnecting" | "demo">("demo");
@@ -521,63 +564,6 @@ export default function MarketApp() {
       active = false;
       controller?.abort();
       window.clearInterval(intervalId);
-    };
-  }, [activeSymbol, timeframe]);
-
-  useEffect(() => {
-    if (activeSymbol !== "XAUUSD") {
-      setXauHistoryError("");
-      setIsXauHistoryLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    let active = true;
-    setIsXauHistoryLoading(true);
-    setXauHistoryError("");
-
-    const loadHistory = async () => {
-      try {
-        const response = await fetch(
-          `/api/xau-history?timeframe=${encodeURIComponent(timeframe)}`,
-          { signal: controller.signal, cache: "no-store" },
-        );
-        const result: unknown = await response.json();
-        if (!result || typeof result !== "object") throw new Error("Respons histori XAUUSD tidak valid.");
-        const data = result as { candles?: Candle[]; error?: string };
-        if (!response.ok) throw new Error(data.error ?? "Histori XAUUSD tidak tersedia.");
-        if (!Array.isArray(data.candles) || data.candles.some((candle) =>
-          !Number.isFinite(candle.time)
-          || ![candle.open, candle.high, candle.low, candle.close].every(Number.isFinite),
-        )) {
-          throw new Error("Struktur histori XAUUSD tidak valid.");
-        }
-        if (!active) return;
-
-        const step = stepByTimeframe[timeframe];
-        const currentBucket = Math.floor(Date.now() / 1000 / step) * step;
-        const history = data.candles.filter((candle) => (candle.time as number) < currentBucket);
-        setFxProCandles((current) => {
-          const merged = new Map(history.map((candle) => [candle.time as number, candle]));
-          for (const candle of current) {
-            if ((candle.time as number) >= currentBucket - step) {
-              merged.set(candle.time as number, candle);
-            }
-          }
-          return [...merged.values()].sort((a, b) => (a.time as number) - (b.time as number)).slice(-120);
-        });
-      } catch (error) {
-        if (!active || (error instanceof Error && error.name === "AbortError")) return;
-        setXauHistoryError(error instanceof Error ? error.message : "Histori XAUUSD tidak tersedia.");
-      } finally {
-        if (active) setIsXauHistoryLoading(false);
-      }
-    };
-
-    void loadHistory();
-    return () => {
-      active = false;
-      controller.abort();
     };
   }, [activeSymbol, timeframe]);
 
@@ -987,7 +973,7 @@ export default function MarketApp() {
           <span>ATLAS</span>
           <span className="brand-tag">MARKET INTELLIGENCE</span>
         </a>
-        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> {isBinanceLive ? `BINANCE SPOT · ${liveConnection.toUpperCase()}` : isFxProLive ? "FXPRO FIX XAUUSD · LIVE" : liveSymbols[activeSymbol] ? (liveConnection === "connecting" || isMarketDataLoading ? "CONNECTING TO BINANCE SPOT" : "BINANCE SPOT · RECONNECTING") : activeSymbol === "XAUUSD" ? (liveConnection === "connecting" ? "CONNECTING TO FXPRO FIX" : liveConnection === "reconnecting" ? "FXPRO FIX · RECONNECTING" : "XAUUSD · DEMO") : "DEMO DATA"}</div>
+        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> {isBinanceLive ? `BINANCE SPOT · ${liveConnection.toUpperCase()}` : isFxProLive ? "TRADINGVIEW CHART · FXPRO FIX XAUUSD · LIVE" : liveSymbols[activeSymbol] ? (liveConnection === "connecting" || isMarketDataLoading ? "CONNECTING TO BINANCE SPOT" : "BINANCE SPOT · RECONNECTING") : activeSymbol === "XAUUSD" ? (liveConnection === "connecting" ? "TRADINGVIEW CHART · CONNECTING TO FXPRO FIX" : liveConnection === "reconnecting" ? "TRADINGVIEW CHART · FXPRO FIX RECONNECTING" : "TRADINGVIEW CHART · XAUUSD") : "DEMO DATA"}</div>
         <div className="topbar-actions">
           <button className="icon-button" aria-label="Notifications"><Icon name="bell" /></button>
           <button className="icon-button" aria-label="Settings"><Icon name="settings" /></button>
@@ -1023,47 +1009,56 @@ export default function MarketApp() {
               <button className="star-button" aria-label="Favorite">☆</button>
             </div>
             <div className="instrument-quote"><strong>{money(instrument.price, instrument.decimals)}</strong><span className={instrument.changePct >= 0 ? "positive" : "negative"}>{instrument.change >= 0 ? "+" : ""}{money(instrument.change, instrument.decimals)} ({instrument.changePct >= 0 ? "+" : ""}{instrument.changePct.toFixed(2)}%)</span>{isFxProLive && <small className="last-tick">Change since first quote</small>}</div>
-            <div className="session-stat"><span>DATA SOURCE</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {liveSymbols[activeSymbol] ? `Binance Spot · ${liveConnection}` : activeSymbol === "XAUUSD" ? `FxPro FIX · ${liveConnection}` : "Demo data"}</strong>{isFxProLive && fxProQuote ? <small className="last-tick">Bid {money(fxProQuote.bid, instrument.decimals)} · Ask {money(fxProQuote.ask, instrument.decimals)}</small> : lastTickAt !== null && isBinanceLive ? <small className="last-tick">Trade tick · {new Date(lastTickAt).toLocaleTimeString()}</small> : null}</div>
+            <div className="session-stat"><span>DATA SOURCE</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {liveSymbols[activeSymbol] ? `Binance Spot · ${liveConnection}` : activeSymbol === "XAUUSD" ? `TradingView chart · FxPro FIX ${liveConnection}` : "Demo data"}</strong>{isFxProLive && fxProQuote ? <small className="last-tick">FIX bid {money(fxProQuote.bid, instrument.decimals)} · ask {money(fxProQuote.ask, instrument.decimals)}</small> : lastTickAt !== null && isBinanceLive ? <small className="last-tick">Trade tick · {new Date(lastTickAt).toLocaleTimeString()}</small> : null}</div>
           </div>
 
           <div className="chart-toolbar">
             <div className="timeframes">{timeframeOptions.map((option) => <button key={option} className={timeframe === option ? "active" : ""} onClick={() => setTimeframe(option)}>{option}</button>)}</div>
-            <div className="toolbar-separator" />
-            <button className={`tool-button ${showEma ? "tool-active" : ""}`} onClick={() => setShowEma(!showEma)}><span className="ema-icon">∿</span> EMA 20</button>
-            <button className={`tool-button ${showVolume ? "tool-active" : ""}`} onClick={() => setShowVolume(!showVolume)} disabled={activeSymbol === "XAUUSD"} title={activeSymbol === "XAUUSD" ? "FxPro FIX spot quotes tidak menyediakan volume transaksi XAUUSD" : undefined}><span className="volume-icon">▥</span> Volume</button>
-            <label className="drawing-select"><span>DRAW</span><select aria-label="Chart drawing tool" value={drawingTool ?? ""} onChange={(event) => setDrawingTool(drawingTools.find((tool) => tool.kind === event.target.value)?.kind ?? null)}><option value="">Off</option>{drawingTools.map((tool) => <option key={tool.kind} value={tool.kind}>{tool.label}</option>)}</select></label>
+            {activeSymbol !== "XAUUSD" && <>
+              <div className="toolbar-separator" />
+              <button className={`tool-button ${showEma ? "tool-active" : ""}`} onClick={() => setShowEma(!showEma)}><span className="ema-icon">∿</span> EMA 20</button>
+              <button className={`tool-button ${showVolume ? "tool-active" : ""}`} onClick={() => setShowVolume(!showVolume)}><span className="volume-icon">▥</span> Volume</button>
+              <label className="drawing-select"><span>DRAW</span><select aria-label="Chart drawing tool" value={drawingTool ?? ""} onChange={(event) => setDrawingTool(drawingTools.find((tool) => tool.kind === event.target.value)?.kind ?? null)}><option value="">Off</option>{drawingTools.map((tool) => <option key={tool.kind} value={tool.kind}>{tool.label}</option>)}</select></label>
+            </>}
             <div className="toolbar-spacer" />
-            <button className="icon-button chart-action" onClick={() => chartApiRef.current?.timeScale().fitContent()} aria-label="Fit chart"><Icon name="eye" size={16} /></button>
-            <span className="chart-currency">USD ▾</span>
+            {activeSymbol !== "XAUUSD"
+              ? <><button className="icon-button chart-action" onClick={() => chartApiRef.current?.timeScale().fitContent()} aria-label="Fit chart"><Icon name="eye" size={16} /></button><span className="chart-currency">USD ▾</span></>
+              : <span className="chart-currency">TradingView · FX_IDC:XAUUSD</span>}
           </div>
 
           <div className="chart-container">
-            <div className="chart-watermark"><span>◈</span> {instrument.symbol}<small> · {timeframe}</small></div>
-            <MarketChart candles={candles} showVolume={showVolume && activeSymbol !== "XAUUSD"} showEma={showEma} drawingTool={drawingTool} symbol={instrument.symbol} onChartReady={onChartReady} />
+            {activeSymbol === "XAUUSD"
+              ? <TradingViewChart timeframe={timeframe} />
+              : <>
+                <div className="chart-watermark"><span>◈</span> {instrument.symbol}<small> · {timeframe}</small></div>
+                <MarketChart candles={candles} showVolume={showVolume} showEma={showEma} drawingTool={drawingTool} symbol={instrument.symbol} onChartReady={onChartReady} />
+              </>}
           </div>
 
-          <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span><span><i className="legend-line" /> EMA 20</span><span className="legend-demo">{isBinanceLive ? `Binance Spot · last trade ${new Date(lastTickAt!).toLocaleTimeString()}` : isFxProLive ? `Yahoo GC=F history · FxPro FIX live · ${new Date(lastTickAt!).toLocaleTimeString()}` : activeSymbol === "XAUUSD" ? (isXauHistoryLoading ? "Loading COMEX gold futures history…" : xauHistoryError ? "Historical gold data unavailable" : "Yahoo Finance · COMEX Gold Futures · waiting for FxPro FIX live quote") : activeMarketData ? "Binance Spot · waiting for trade tick" : "Illustrative demo data · Not live market prices"}</span></div>
-          {activeSymbol === "XAUUSD" && xauHistoryError && <p className="data-error" role="status">{xauHistoryError}</p>}
+          {activeSymbol === "XAUUSD"
+            ? <div className="chart-legend"><span className="legend-demo">Chart by TradingView · FX_IDC:XAUUSD. Header quote and price alerts use FxPro FIX; prices may differ.</span></div>
+            : <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span><span><i className="legend-line" /> EMA 20</span><span className="legend-demo">{isBinanceLive ? `Binance Spot · last trade ${new Date(lastTickAt!).toLocaleTimeString()}` : activeMarketData ? "Binance Spot · waiting for trade tick" : "Illustrative demo data · Not live market prices"}</span></div>}
 
           <section className="analysis-table-panel">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">TECHNICAL SUMMARY</span><h2>Indicator dashboard</h2></div>
               <div className="analysis-heading-actions">
                 <span className="analysis-timeframe">{timeframe} · {instrument.symbol}</span>
-                <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || (activeSymbol === "XAUUSD" && !isFxProLive)}>
+                <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || activeSymbol === "XAUUSD"} title={activeSymbol === "XAUUSD" ? "TradingView tidak mengekspos candle widget ke analisis Atlas" : undefined}>
                   {isGeminiLoading ? "Menganalisis..." : "✦ Analisis Gemini"}
                 </button>
               </div>
             </div>
-            {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">{isFxProLive ? "Candle historis memakai GC=F (futures emas COMEX) dan candle berjalan memakai kuotasi FxPro FIX; indikator dapat mencerminkan perbedaan harga kedua instrumen." : "Histori menggunakan GC=F (futures emas COMEX), bukan XAUUSD spot FxPro. Harga historis dapat berbeda; candle live akan mengikuti kuotasi FxPro FIX setelah tersambung."}</p>}
-            <div className="indicator-grid">
+            {activeSymbol === "XAUUSD"
+              ? <p className="tool-disclaimer">Chart XAUUSD ditampilkan langsung oleh TradingView. Widget tidak membagikan candle historisnya ke Atlas, jadi indikator teknikal dan analisis Gemini untuk XAUUSD tidak tersedia.</p>
+              : <div className="indicator-grid">
               <div className="indicator-cell"><span>RSI · 14</span><strong className={analysis.rsi14 >= 70 ? "negative" : analysis.rsi14 <= 30 ? "positive" : ""}>{analysis.rsi14.toFixed(1)}</strong><small>{analysis.rsi14 >= 70 ? "Overbought zone" : analysis.rsi14 <= 30 ? "Oversold zone" : "Neutral momentum"}</small></div>
               <div className="indicator-cell"><span>MACD · 12/26/9</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "+" : ""}{money(analysis.macdHistogram, instrument.decimals)}</strong><small>{analysis.macdHistogram >= 0 ? "Positive momentum" : "Negative momentum"}</small></div>
               <div className="indicator-cell"><span>EMA · 20</span><strong>{money(analysis.ema20, instrument.decimals)}</strong><small>{instrument.price >= analysis.ema20 ? "Price above average" : "Price below average"}</small></div>
               <div className="indicator-cell"><span>EMA · 50</span><strong>{money(analysis.ema50, instrument.decimals)}</strong><small>{analysis.ema20 >= analysis.ema50 ? "Average trend rising" : "Average trend falling"}</small></div>
               <div className="indicator-cell"><span>ATR · 14</span><strong>{money(analysis.atr14, instrument.decimals)}</strong><small>Recent volatility range</small></div>
               <div className="indicator-cell"><span>20-bar range</span><strong>{money(analysis.support, instrument.decimals)} – {money(analysis.resistance, instrument.decimals)}</strong><small>Support / resistance estimate</small></div>
-            </div>
+              </div>}
             {(isGeminiLoading || geminiAnalysis || geminiError) && (
               <div className={`gemini-result ${geminiError ? "has-error" : ""}`} aria-live="polite">
                 <strong>Gemini · {instrument.symbol} · {timeframe}</strong>
@@ -1078,7 +1073,7 @@ export default function MarketApp() {
           <section className="market-tools-panel">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">MARKET MICROSTRUCTURE</span><h2>Order flow &amp; volume tools</h2></div>
-              <span className="analysis-timeframe">{isBinanceLive ? "Binance Spot · live" : isFxProLive ? "FxPro FIX · live quotes" : `${instrument.symbol} · demo candles`}</span>
+              <span className="analysis-timeframe">{isBinanceLive ? "Binance Spot · live" : isFxProLive ? "FxPro FIX · live quotes" : activeSymbol === "XAUUSD" ? "TradingView chart · FxPro FIX quotes" : `${instrument.symbol} · demo candles`}</span>
             </div>
             {marketDataError && <p className="data-error" role="status">{marketDataError}</p>}
             <div className="market-tool-tabs" role="tablist" aria-label="Market analysis tools">
@@ -1135,7 +1130,7 @@ export default function MarketApp() {
               {typeof Notification !== "undefined" && Notification.permission === "default" && <button type="button" className="notification-button" onClick={() => void Notification.requestPermission()}>Enable browser notification</button>}
             </form>
             {alertsError && <p className="data-error" role="alert">{alertsError}</p>}
-            <p className="tool-disclaimer">Alert disimpan di browser ini dan hanya dipantau saat dashboard terbuka. {isBinanceLive ? "Harga memakai feed live Binance Spot." : isFxProLive ? "Harga memakai midpoint kuotasi live FxPro FIX XAUUSD." : "Harga instrumen ini simulasi."} Notifikasi browser memerlukan izin.</p>
+            <p className="tool-disclaimer">Alert disimpan di browser ini dan hanya dipantau saat dashboard terbuka. {isBinanceLive ? "Harga memakai feed live Binance Spot." : activeSymbol === "XAUUSD" ? "Harga memakai midpoint kuotasi FxPro FIX XAUUSD dan dapat berbeda dari chart TradingView." : "Harga instrumen ini simulasi."} Notifikasi browser memerlukan izin.</p>
             {currentAlerts.length > 0 ? <div className="alert-list">{currentAlerts.map((alert) => <div className="alert-item" key={alert.id}><span className={alert.triggered ? "triggered" : ""}>{alert.triggered ? "Triggered" : "Armed"}</span><strong>{alert.direction === "above" ? "≥" : "≤"} {money(alert.target, instrument.decimals)}</strong><button onClick={() => setAlerts((current) => current.filter((item) => item.id !== alert.id))} aria-label={`Remove alert at ${alert.target}`}>Remove</button></div>)}</div> : <p className="data-empty">Belum ada alert untuk {instrument.symbol}.</p>}
           </section>
 
@@ -1148,6 +1143,14 @@ export default function MarketApp() {
         </section>
 
         <aside id="account-sidebar" className={`account-panel analysis-panel ${showAccount ? "" : "closed"}`}>
+          {activeSymbol === "XAUUSD" ? (
+            <section className="analysis-card xau-data-note">
+              <div className="side-heading"><div><span className="eyebrow">XAUUSD DATA</span><h3>TradingView chart</h3></div></div>
+              <p>Historical candles are displayed by TradingView (FX_IDC:XAUUSD). Atlas receives only FxPro FIX quotes; the embedded chart does not provide candles to Atlas indicators.</p>
+              {fxProQuote && <div className="analysis-row"><span>FxPro FIX midpoint</span><strong>{money((fxProQuote.bid + fxProQuote.ask) / 2, instrument.decimals)}</strong></div>}
+              <small>Sources can differ. Technical indicators from Atlas are unavailable for XAUUSD.</small>
+            </section>
+          ) : <>
           <section className="signal-card">
             <div className="side-heading"><div><span className="eyebrow">TECHNICAL OUTLOOK</span><h3>{instrument.symbol}</h3></div><span className={`signal-pill ${analysis.bias.toLowerCase()}`}>{analysis.bias}</span></div>
             <p>{analysis.bias === "Bullish" ? "Momentum and trend indicators are aligned positively." : analysis.bias === "Bearish" ? "Momentum and trend indicators are aligned negatively." : "Trend and momentum indicators show mixed conditions."}</p>
@@ -1169,10 +1172,11 @@ export default function MarketApp() {
             <div className="analysis-row"><span>ATR (14)</span><strong>{money(analysis.atr14, instrument.decimals)}</strong></div>
           </section>
           <p className="analysis-disclaimer">Demo OHLC data only. Indicator readings are educational and are not financial advice or a live market feed.</p>
+          </>}
         </aside>
       </div>
 
-      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {activeMarketData ? `Binance Spot · ${liveConnection}` : "Demo market data + World Bank"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a><span>© 2025 TradingView, Inc.</span><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
+      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {activeMarketData ? `Binance Spot · ${liveConnection}` : activeSymbol === "XAUUSD" ? `TradingView chart · FxPro FIX ${liveConnection}` : "Demo market data + World Bank"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView charts</a><span>© 2025 TradingView, Inc.</span><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
     </main>
   );
 }

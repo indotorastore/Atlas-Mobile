@@ -35,9 +35,10 @@ usage monitoring.
   automatically while REST polling continues as a fallback. The server falls
   back to Binance's public market-data-only REST host if the primary API host is
   unavailable. No API key is needed.
-- XAUUSD uses Yahoo Finance COMEX gold futures (`GC=F`) for historical candles
-  and the FxPro cTrader FIX 4.4 **price** connection for live quotes when configured.
-  Copy the FIX price-connection settings from cTrader into `.env.local` using
+- XAUUSD chart candles are displayed by TradingView's official Advanced Chart
+  widget using `FX_IDC:XAUUSD`. FxPro cTrader FIX 4.4 supplies the separate
+  live bid/ask quote shown in Atlas when configured; its price can differ from
+  TradingView. Copy the FIX price-connection settings from cTrader into `.env.local` using
   the names in `.env.example`; use the SSL price port, not the trading port.
   `FXPRO_FIX_XAUUSD_SYMBOL_ID` is the numeric instrument ID supplied by
   FxPro/Spotware, not the text `XAUUSD`. Keep the FIX password server-side and
@@ -49,12 +50,12 @@ usage monitoring.
   that supports long-lived HTTP streams; serverless function time limits may
   interrupt the connection. Credentials are only read by the server. Protect a
   deployed app with access control; otherwise visitors could use its FIX feed.
-- The app requests spot bid/ask quotes and charts their midpoint. FIX spot
-  quotes do not provide historical intraday candles, traded volume, or
-  transaction-by-transaction bid/ask data. Yahoo Finance `GC=F` bars are COMEX
-  gold futures, not FxPro XAUUSD spot, so the historical price can differ from
-  the live FIX quote; the current candle is built from FIX quotes after
-  connecting. Volume profile, DOM depth, and footprint are unavailable for XAUUSD.
+- The TradingView chart is an embedded widget and does not expose its OHLC
+  history to Atlas. Atlas indicators and Gemini analysis are therefore
+  unavailable for XAUUSD. FIX spot quotes do not provide historical intraday
+  candles, traded volume, or transaction-by-transaction bid/ask data. Order
+  blocks, when available, use only FIX quotes received since connecting.
+  Volume profile, DOM depth, and footprint are unavailable for XAUUSD.
 - Other watchlist symbols continue to use illustrative demo prices and candles.
 - DOM and footprint are available only for those Binance symbols. Order blocks
   are heuristic zones; the volume profile allocates each candle's volume evenly
