@@ -35,13 +35,14 @@ usage monitoring.
   it reconnects automatically while REST polling continues as a fallback. The
   server falls back to Binance's public market-data-only REST host if the primary
   API host is unavailable. No API key is needed.
-- Preset watchlist charts are displayed by TradingView's official Advanced Chart
-  widget: BTC/ETH/SOL use Binance symbols, EURUSD uses `FX:EURUSD`, XAUUSD uses
-  `FX_IDC:XAUUSD`, and AAPL/NVDA use their NASDAQ symbols. Custom demo symbols
-  continue to use the Atlas demo chart. TradingView chart prices may differ from
-  Atlas quotes. Copy the FIX price-connection settings from cTrader into
-  `.env.local` using the names in `.env.example`; use the SSL price port, not the
-  trading port.
+- The app uses TradingView Lightweight Charts to render its own candle data.
+  BTCUSD, ETHUSD, and SOLUSD receive live/history candles from Binance Spot.
+  XAUUSD candles are built from FxPro FIX midpoint quotes received since the
+  current connection; FIX does not provide candle history or traded volume.
+  EURUSD, AAPL, NVDA, and custom symbols use illustrative demo candles until a
+  data provider is configured. Copy the FIX price-connection settings from
+  cTrader into `.env.local` using the names in `.env.example`; use the SSL price
+  port, not the trading port.
   `FXPRO_FIX_XAUUSD_SYMBOL_ID` is the numeric instrument ID supplied by
   FxPro/Spotware, not the text `XAUUSD`. Keep the FIX password server-side and
   never use a `NEXT_PUBLIC_` prefix.
@@ -52,16 +53,14 @@ usage monitoring.
   that supports long-lived HTTP streams; serverless function time limits may
   interrupt the connection. Credentials are only read by the server. Protect a
   deployed app with access control; otherwise visitors could use its FIX feed.
-- TradingView charts are embedded widgets and do not expose their OHLC history
-  to Atlas. Atlas indicators and Gemini analysis use separate Atlas feeds and
-  may differ from the displayed chart; they are disabled for XAUUSD. FIX spot
-  quotes do not provide historical intraday candles, traded volume, or
-  transaction-by-transaction bid/ask data. Order blocks, when available, use
-  only FIX quotes received since connecting. Volume profile, DOM depth, and
-  footprint are unavailable for XAUUSD.
-- For symbols without an Atlas live feed, Atlas-side quotes and analysis continue
-  to use illustrative demo prices; the TradingView widget still displays its
-  mapped external chart.
+- Lightweight Charts is a chart-rendering library and does not provide market
+  data. Atlas calculates indicators from the same internal candle series shown
+  in its chart. XAUUSD indicators require at least 50 FIX candles collected
+  since connecting; historical backfill is unavailable. For other symbols
+  without a live Atlas feed, quotes and analysis use illustrative demo prices.
+- FIX spot quotes do not provide traded volume or transaction-by-transaction
+  bid/ask data. Volume profile, DOM depth, and footprint are unavailable for
+  XAUUSD.
 - DOM and footprint are available only for those Binance symbols. Order blocks
   are heuristic zones; the volume profile allocates each candle's volume evenly
   across its high-low range, so it is an estimate rather than tick-level data.

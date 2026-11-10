@@ -236,61 +236,6 @@ function groupFootprintTrades(trades: MarketData["trades"], decimals: number) {
   return [...levels.values()].sort((a, b) => b.price - a.price).slice(0, 12);
 }
 
-const tradingViewIntervals: Record<Timeframe, string> = {
-  "1m": "1",
-  "5m": "5",
-  "15m": "15",
-  "1H": "60",
-  "4H": "240",
-  "1D": "D",
-};
-
-const tradingViewSymbols: Record<string, string> = {
-  BTCUSD: "BINANCE:BTCUSDT",
-  ETHUSD: "BINANCE:ETHUSDT",
-  EURUSD: "FX:EURUSD",
-  XAUUSD: "FX_IDC:XAUUSD",
-  AAPL: "NASDAQ:AAPL",
-  NVDA: "NASDAQ:NVDA",
-  SOLUSD: "BINANCE:SOLUSDT",
-};
-
-function TradingViewChart({ symbol, timeframe }: { symbol: string; timeframe: Timeframe }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const widgetContainer = document.createElement("div");
-    widgetContainer.className = "tradingview-widget-container";
-    const widget = document.createElement("div");
-    widget.className = "tradingview-widget-container__widget";
-    const script = document.createElement("script");
-    script.type = "text/javascript";
-    script.async = true;
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
-    script.textContent = JSON.stringify({
-      autosize: true,
-      symbol,
-      interval: tradingViewIntervals[timeframe],
-      timezone: "Etc/UTC",
-      theme: "dark",
-      style: "1",
-      locale: "en",
-      allow_symbol_change: false,
-      calendar: false,
-      support_host: "https://www.tradingview.com",
-    });
-    widgetContainer.append(widget, script);
-    container.replaceChildren(widgetContainer);
-
-    return () => container.replaceChildren();
-  }, [symbol, timeframe]);
-
-  return <div className="tradingview-chart-host" ref={containerRef} />;
-}
-
 function MarketChart({
   candles,
   showVolume,
@@ -497,12 +442,10 @@ export default function MarketApp() {
   const fxProReferencePriceRef = useRef<number | null>(null);
   const instrument = instruments.find((item) => item.symbol === activeSymbol) ?? instruments[0];
   const activeMarketData = marketData?.symbol === activeSymbol && marketData.timeframe === timeframe ? marketData : null;
-  const tradingViewSymbol = tradingViewSymbols[activeSymbol];
-  const usesTradingViewChart = Boolean(tradingViewSymbol);
   const candles = useMemo(
-    () => activeMarketData?.candles ?? (activeSymbol === "XAUUSD" && fxProCandles.length > 0
+    () => activeSymbol === "XAUUSD"
       ? fxProCandles
-      : makeCandles(instrument, timeframe)),
+      : activeMarketData?.candles ?? makeCandles(instrument, timeframe),
     [activeMarketData, activeSymbol, fxProCandles, instrument, timeframe],
   );
   const analysis = useMemo(() => calculateAnalysis(candles), [candles]);
@@ -514,6 +457,7 @@ export default function MarketApp() {
   );
   const isBinanceLive = Boolean(activeMarketData && liveSymbols[activeSymbol] && liveConnection === "live" && lastTickAt !== null);
   const isFxProLive = activeSymbol === "XAUUSD" && liveConnection === "live" && lastTickAt !== null;
+  const isXauAnalysisReady = isFxProLive && fxProCandles.length >= 50;
   const profilePeak = Math.max(1, ...volumeProfile.map((level) => level.volume));
   const currentAlerts = alerts.filter((alert) => alert.symbol === activeSymbol);
   const filteredInstruments = instruments.filter((item) =>
@@ -838,7 +782,6 @@ export default function MarketApp() {
   }, []);
 
   useEffect(() => {
-    if (activeSymbol === "XAUUSD" && !isFxProLive) return;
     try {
       const saved = localStorage.getItem("marketdesk-price-alerts");
       if (saved) {
@@ -980,7 +923,7 @@ export default function MarketApp() {
           <span>ATLAS</span>
           <span className="brand-tag">MARKET INTELLIGENCE</span>
         </a>
-        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> {usesTradingViewChart ? `TRADINGVIEW · ${tradingViewSymbol}` : "DEMO DATA"}</div>
+        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> {isBinanceLive ? "BINANCE SPOT · LIVE" : isFxProLive ? "FXPRO FIX XAUUSD · LIVE" : liveSymbols[activeSymbol] ? "BINANCE SPOT · CONNECTING" : activeSymbol === "XAUUSD" ? `FXPRO FIX · ${liveConnection.toUpperCase()}` : "DEMO DATA"}</div>
         <div className="topbar-actions">
           <button className="icon-button" aria-label="Notifications"><Icon name="bell" /></button>
           <button className="icon-button" aria-label="Settings"><Icon name="settings" /></button>
@@ -1005,61 +948,55 @@ export default function MarketApp() {
             ))}
             {filteredInstruments.length === 0 && <div className="empty-search"><span>No matching markets</span><button onClick={addInstrument}><Icon name="plus" size={14} /> Add demo symbol</button></div>}
           </div>
-          <div className="watchlist-footer"><span className="live-dot" /> Chart preset: TradingView · quote Atlas: Binance / FIX / demo</div>
+          <div className="watchlist-footer"><span className="live-dot" /> Lightweight Charts · Binance / FIX / demo data</div>
         </aside>
 
         <section className="main-workspace">
           <div className="instrument-header">
             <div className="instrument-title">
               <div className="instrument-avatar">{instrument.symbol.slice(0, 1)}</div>
-              <div><div className="symbol-name">{instrument.symbol}<span className="market-type">{usesTradingViewChart ? " · TRADINGVIEW" : " · DEMO"}</span></div><div className="instrument-fullname">{instrument.name}</div></div>
+              <div><div className="symbol-name">{instrument.symbol}<span className="market-type">{activeMarketData ? " · BINANCE SPOT" : isFxProLive ? " · FXPRO FIX" : " · DEMO"}</span></div><div className="instrument-fullname">{instrument.name}</div></div>
               <button className="star-button" aria-label="Favorite">☆</button>
             </div>
             <div className="instrument-quote"><strong>{money(instrument.price, instrument.decimals)}</strong><span className={instrument.changePct >= 0 ? "positive" : "negative"}>{instrument.change >= 0 ? "+" : ""}{money(instrument.change, instrument.decimals)} ({instrument.changePct >= 0 ? "+" : ""}{instrument.changePct.toFixed(2)}%)</span>{isFxProLive && <small className="last-tick">Change since first quote</small>}</div>
-            <div className="session-stat"><span>CHART SOURCE</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {usesTradingViewChart ? `TradingView · ${tradingViewSymbol}` : "Atlas demo chart"}</strong>{isFxProLive && fxProQuote ? <small className="last-tick">FIX bid {money(fxProQuote.bid, instrument.decimals)} · ask {money(fxProQuote.ask, instrument.decimals)}</small> : lastTickAt !== null && isBinanceLive ? <small className="last-tick">Binance trade · ${new Date(lastTickAt).toLocaleTimeString()}</small> : !isBinanceLive ? <small className="last-tick">Atlas quote is illustrative</small> : null}</div>
+            <div className="session-stat"><span>CHART DATA</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {isBinanceLive ? "Binance Spot · live" : activeMarketData ? "Binance Spot · history loaded" : isFxProLive ? "FxPro FIX · live" : activeSymbol === "XAUUSD" ? `FxPro FIX · ${liveConnection}` : "Illustrative demo"}</strong>{isFxProLive && fxProQuote ? <small className="last-tick">FIX bid {money(fxProQuote.bid, instrument.decimals)} · ask {money(fxProQuote.ask, instrument.decimals)}</small> : isBinanceLive ? <small className="last-tick">Live trade · {new Date(lastTickAt!).toLocaleTimeString()}</small> : activeMarketData ? <small className="last-tick">Waiting for live trade tick</small> : activeSymbol === "XAUUSD" && !isFxProLive ? <small className="last-tick">Quote appears after first FIX update</small> : null}</div>
           </div>
 
           <div className="chart-toolbar">
             <div className="timeframes">{timeframeOptions.map((option) => <button key={option} className={timeframe === option ? "active" : ""} onClick={() => setTimeframe(option)}>{option}</button>)}</div>
-            {!usesTradingViewChart && <>
+            <>
               <div className="toolbar-separator" />
               <button className={`tool-button ${showEma ? "tool-active" : ""}`} onClick={() => setShowEma(!showEma)}><span className="ema-icon">∿</span> EMA 20</button>
-              <button className={`tool-button ${showVolume ? "tool-active" : ""}`} onClick={() => setShowVolume(!showVolume)}><span className="volume-icon">▥</span> Volume</button>
+              <button className={`tool-button ${showVolume ? "tool-active" : ""}`} onClick={() => setShowVolume(!showVolume)} disabled={activeSymbol === "XAUUSD"} title={activeSymbol === "XAUUSD" ? "FxPro FIX quotes do not include traded volume" : undefined}><span className="volume-icon">▥</span> Volume</button>
               <label className="drawing-select"><span>DRAW</span><select aria-label="Chart drawing tool" value={drawingTool ?? ""} onChange={(event) => setDrawingTool(drawingTools.find((tool) => tool.kind === event.target.value)?.kind ?? null)}><option value="">Off</option>{drawingTools.map((tool) => <option key={tool.kind} value={tool.kind}>{tool.label}</option>)}</select></label>
-            </>}
+            </>
             <div className="toolbar-spacer" />
-            {!usesTradingViewChart
-              ? <><button className="icon-button chart-action" onClick={() => chartApiRef.current?.timeScale().fitContent()} aria-label="Fit chart"><Icon name="eye" size={16} /></button><span className="chart-currency">USD ▾</span></>
-              : <span className="chart-currency">TradingView · {tradingViewSymbol}</span>}
+            <button className="icon-button chart-action" onClick={() => chartApiRef.current?.timeScale().fitContent()} aria-label="Fit chart"><Icon name="eye" size={16} /></button>
+            <span className="chart-currency">USD ▾</span>
           </div>
 
           <div className="chart-container">
-            {usesTradingViewChart
-              ? <TradingViewChart symbol={tradingViewSymbol ?? ""} timeframe={timeframe} />
-              : <>
-                <div className="chart-watermark"><span>◈</span> {instrument.symbol}<small> · {timeframe}</small></div>
-                <MarketChart candles={candles} showVolume={showVolume} showEma={showEma} drawingTool={drawingTool} symbol={instrument.symbol} onChartReady={onChartReady} />
-              </>}
+            <div className="chart-watermark"><span>◈</span> {instrument.symbol}<small> · {timeframe}</small></div>
+            <MarketChart candles={candles} showVolume={showVolume && activeSymbol !== "XAUUSD"} showEma={showEma} drawingTool={drawingTool} symbol={instrument.symbol} onChartReady={onChartReady} />
           </div>
 
-          {usesTradingViewChart
-            ? <div className="chart-legend"><span className="legend-demo">Chart by TradingView · {tradingViewSymbol}. Atlas quote, alerts, and indicators use separate feeds and may differ.</span></div>
-            : <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span><span><i className="legend-line" /> EMA 20</span><span className="legend-demo">{isBinanceLive ? `Binance Spot · last trade ${new Date(lastTickAt!).toLocaleTimeString()}` : activeMarketData ? "Binance Spot · waiting for trade tick" : "Illustrative demo data · Not live market prices"}</span></div>}
+          <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span>{showEma && <span><i className="legend-line" /> EMA 20</span>}<span className="legend-demo">{isBinanceLive ? `Binance Spot · live candles · ${new Date(lastTickAt!).toLocaleTimeString()}` : activeMarketData ? "Binance Spot · historical candles · waiting for live trade" : isFxProLive ? "FxPro FIX · candles accumulated since connection; no historical backfill" : activeSymbol === "XAUUSD" ? `Waiting for FxPro FIX · ${fxProCandles.length ? "candles since connection" : "no XAUUSD candles yet"}` : "Illustrative demo candles · not live market data"}</span></div>
 
           <section className="analysis-table-panel">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">TECHNICAL SUMMARY</span><h2>Indicator dashboard</h2></div>
               <div className="analysis-heading-actions">
                 <span className="analysis-timeframe">{timeframe} · {instrument.symbol}</span>
-                <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || activeSymbol === "XAUUSD"} title={activeSymbol === "XAUUSD" ? "TradingView tidak mengekspos candle widget ke analisis Atlas" : undefined}>
+                <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || (activeSymbol === "XAUUSD" && !isXauAnalysisReady)} title={activeSymbol === "XAUUSD" && !isXauAnalysisReady ? "Kumpulkan sedikitnya 50 candle dari kuotasi FIX sebelum analisis" : undefined}>
                   {isGeminiLoading ? "Menganalisis..." : "✦ Analisis Gemini"}
                 </button>
               </div>
             </div>
-            {activeSymbol === "XAUUSD"
-              ? <p className="tool-disclaimer">Chart XAUUSD ditampilkan langsung oleh TradingView. Widget tidak membagikan candle historisnya ke Atlas, jadi indikator teknikal dan analisis Gemini untuk XAUUSD tidak tersedia.</p>
+            {activeSymbol === "XAUUSD" && !isXauAnalysisReady
+              ? <p className="tool-disclaimer">{fxProCandles.length < 50 ? `Indikator dan analisis Gemini aktif setelah terkumpul 50 candle FIX. Terkumpul ${fxProCandles.length}/50. Tidak ada histori candle sebelum koneksi.` : "Menunggu kuotasi FxPro FIX live."}</p>
               : <>
-              {usesTradingViewChart && <p className="tool-disclaimer">Indikator Atlas dihitung dari feed terpisah, bukan candle widget TradingView. Untuk instrumen tanpa feed Atlas live, nilainya bersifat ilustratif.</p>}
+              {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">Indikator dihitung hanya dari candle midpoint FxPro FIX sejak koneksi aktif; tidak ada backfill candle historis.</p>}
+              {activeSymbol !== "XAUUSD" && !activeMarketData && <p className="tool-disclaimer">Indikator memakai candle ilustratif, bukan data live.</p>}
               <div className="indicator-grid">
               <div className="indicator-cell"><span>RSI · 14</span><strong className={analysis.rsi14 >= 70 ? "negative" : analysis.rsi14 <= 30 ? "positive" : ""}>{analysis.rsi14.toFixed(1)}</strong><small>{analysis.rsi14 >= 70 ? "Overbought zone" : analysis.rsi14 <= 30 ? "Oversold zone" : "Neutral momentum"}</small></div>
               <div className="indicator-cell"><span>MACD · 12/26/9</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "+" : ""}{money(analysis.macdHistogram, instrument.decimals)}</strong><small>{analysis.macdHistogram >= 0 ? "Positive momentum" : "Negative momentum"}</small></div>
@@ -1075,7 +1012,7 @@ export default function MarketApp() {
                 {isGeminiLoading && <p>Gemini sedang membaca indikator teknikal...</p>}
                 {geminiAnalysis && <p>{geminiAnalysis}</p>}
                 {geminiError && <p>{geminiError}</p>}
-                <small>Analisis AI memakai data Atlas terpisah dari chart TradingView; kualitas mengikuti sumber feed. Bukan nasihat keuangan.</small>
+                <small>Analisis AI memakai candle dari feed Atlas yang ditampilkan di chart; pair demo memakai data ilustratif. Bukan nasihat keuangan.</small>
               </div>
             )}
           </section>
@@ -1083,7 +1020,7 @@ export default function MarketApp() {
           <section className="market-tools-panel">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">MARKET MICROSTRUCTURE</span><h2>Order flow &amp; volume tools</h2></div>
-              <span className="analysis-timeframe">{usesTradingViewChart ? `TradingView · ${isBinanceLive ? "Binance Spot live" : isFxProLive ? "FxPro FIX live" : "Atlas demo quotes"}` : `${instrument.symbol} · demo candles`}</span>
+              <span className="analysis-timeframe">{isBinanceLive ? "Binance Spot · live" : activeMarketData ? "Binance Spot · REST" : isFxProLive ? "FxPro FIX · live quotes" : activeSymbol === "XAUUSD" ? "FxPro FIX · waiting for quotes" : `${instrument.symbol} · demo candles`}</span>
             </div>
             {marketDataError && <p className="data-error" role="status">{marketDataError}</p>}
             <div className="market-tool-tabs" role="tablist" aria-label="Market analysis tools">
@@ -1140,7 +1077,7 @@ export default function MarketApp() {
               {typeof Notification !== "undefined" && Notification.permission === "default" && <button type="button" className="notification-button" onClick={() => void Notification.requestPermission()}>Enable browser notification</button>}
             </form>
             {alertsError && <p className="data-error" role="alert">{alertsError}</p>}
-            <p className="tool-disclaimer">Alert disimpan di browser ini dan hanya dipantau saat dashboard terbuka. {isBinanceLive ? "Harga memakai feed live Binance Spot." : isFxProLive ? "Harga memakai midpoint kuotasi live FxPro FIX." : "Harga Atlas untuk instrumen ini simulasi dan dapat berbeda dari chart TradingView."} Notifikasi browser memerlukan izin.</p>
+            <p className="tool-disclaimer">Alert disimpan di browser ini dan hanya dipantau saat dashboard terbuka. {isBinanceLive ? "Harga memakai feed live Binance Spot." : isFxProLive ? "Harga memakai midpoint kuotasi live FxPro FIX." : "Harga instrumen ini masih ilustratif."} Notifikasi browser memerlukan izin.</p>
             {currentAlerts.length > 0 ? <div className="alert-list">{currentAlerts.map((alert) => <div className="alert-item" key={alert.id}><span className={alert.triggered ? "triggered" : ""}>{alert.triggered ? "Triggered" : "Armed"}</span><strong>{alert.direction === "above" ? "≥" : "≤"} {money(alert.target, instrument.decimals)}</strong><button onClick={() => setAlerts((current) => current.filter((item) => item.id !== alert.id))} aria-label={`Remove alert at ${alert.target}`}>Remove</button></div>)}</div> : <p className="data-empty">Belum ada alert untuk {instrument.symbol}.</p>}
           </section>
 
@@ -1155,11 +1092,11 @@ export default function MarketApp() {
         <aside id="account-sidebar" className={`account-panel analysis-panel ${showAccount ? "" : "closed"}`}>
           {activeSymbol === "XAUUSD" ? (
             <section className="analysis-card xau-data-note">
-              <div className="side-heading"><div><span className="eyebrow">CHART DATA</span><h3>TradingView widget</h3></div></div>
-              <p>Historical and live candles are displayed directly by TradingView. Atlas uses separate feeds for quotes and technical indicators; those prices may differ.</p>
+              <div className="side-heading"><div><span className="eyebrow">XAUUSD DATA</span><h3>FxPro FIX</h3></div></div>
+              <p>Chart and analysis use midpoint candles built from FxPro FIX quotes received while this session is connected.</p>
               {fxProQuote && <div className="analysis-row"><span>FxPro FIX midpoint</span><strong>{money((fxProQuote.bid + fxProQuote.ask) / 2, instrument.decimals)}</strong></div>}
-              {activeMarketData && <div className="analysis-row"><span>Binance Spot</span><strong>{money(activeMarketData.currentPrice, instrument.decimals)}</strong></div>}
-              <small>Technical indicators are unavailable for XAUUSD because TradingView does not expose widget candles to Atlas.</small>
+              <div className="analysis-row"><span>Candles this session</span><strong>{fxProCandles.length}</strong></div>
+              <small>FIX does not provide candle history or traded volume. Candles before this connection are unavailable.</small>
             </section>
           ) : <>
           <section className="signal-card">
@@ -1187,7 +1124,7 @@ export default function MarketApp() {
         </aside>
       </div>
 
-      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {usesTradingViewChart ? `TradingView · ${tradingViewSymbol}` : "Atlas demo chart"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView charts</a><span>© 2025 TradingView, Inc.</span><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
+      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {isBinanceLive ? "Binance Spot" : isFxProLive ? "FxPro FIX" : "Atlas illustrative data"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a><span>© 2025 TradingView, Inc.</span><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
     </main>
   );
 }
