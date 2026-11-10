@@ -32,7 +32,9 @@ usage monitoring.
 - BTCUSD, ETHUSD, and SOLUSD use Binance Spot public market-data endpoints for
   candles, order-book depth, and aggregate trades, plus Binance Spot WebSocket
   trades for live price/candle movement. If the socket disconnects, it reconnects
-  automatically while REST polling continues as a fallback. No API key is needed.
+  automatically while REST polling continues as a fallback. The server falls
+  back to Binance's public market-data-only REST host if the primary API host is
+  unavailable. No API key is needed.
 - XAUUSD uses the FxPro cTrader FIX 4.4 **price** connection when configured.
   Copy the FIX price-connection settings from cTrader into `.env.local` using
   the names in `.env.example`; use the SSL price port, not the trading port.

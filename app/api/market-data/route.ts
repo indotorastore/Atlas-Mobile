@@ -15,6 +15,8 @@ const intervals: Record<string, string> = {
   "1D": "1d",
 };
 
+const binanceApiHosts = ["api.binance.com", "data-api.binance.vision"];
+
 type BinanceTrade = {
   p: string;
   q: string;
@@ -23,16 +25,26 @@ type BinanceTrade = {
 };
 
 async function fetchBinance(path: string) {
-  const response = await fetch(`https://api.binance.com/api/v3/${path}`, {
-    cache: "no-store",
-    signal: AbortSignal.timeout(12_000),
-  });
+  const failures: string[] = [];
 
-  if (!response.ok) {
-    throw new Error(`Binance returned HTTP ${response.status}`);
+  for (const host of binanceApiHosts) {
+    try {
+      const response = await fetch(`https://${host}/api/v3/${path}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(5_000),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return response.json() as Promise<unknown>;
+    } catch (error) {
+      failures.push(`${host}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  return response.json() as Promise<unknown>;
+  throw new Error(`All Binance market-data hosts failed (${failures.join("; ")})`);
 }
 
 export async function GET(request: Request) {
@@ -117,7 +129,8 @@ export async function GET(request: Request) {
       asks: parseBook(depth.asks),
       trades,
     });
-  } catch {
+  } catch (error) {
+    console.error("[market-data] Binance request failed", { symbol, timeframe, error });
     return NextResponse.json({ error: "Data live Binance tidak tersedia saat ini. Periksa koneksi lalu coba lagi." }, { status: 502 });
   }
 }
