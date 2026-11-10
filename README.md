@@ -29,17 +29,19 @@ usage monitoring.
 
 ## Market data and dashboards
 
-- BTCUSD, ETHUSD, and SOLUSD use Binance Spot public market-data endpoints for
-  candles, order-book depth, and aggregate trades, plus Binance Spot WebSocket
-  trades for live price/candle movement. If the socket disconnects, it reconnects
-  automatically while REST polling continues as a fallback. The server falls
-  back to Binance's public market-data-only REST host if the primary API host is
-  unavailable. No API key is needed.
-- XAUUSD chart candles are displayed by TradingView's official Advanced Chart
-  widget using `FX_IDC:XAUUSD`. FxPro cTrader FIX 4.4 supplies the separate
-  live bid/ask quote shown in Atlas when configured; its price can differ from
-  TradingView. Copy the FIX price-connection settings from cTrader into `.env.local` using
-  the names in `.env.example`; use the SSL price port, not the trading port.
+- Atlas market-data tools for BTCUSD, ETHUSD, and SOLUSD use Binance Spot public
+  endpoints for candles, order-book depth, and aggregate trades, plus Binance
+  Spot WebSocket trades for live quote/candle data. If the socket disconnects,
+  it reconnects automatically while REST polling continues as a fallback. The
+  server falls back to Binance's public market-data-only REST host if the primary
+  API host is unavailable. No API key is needed.
+- Preset watchlist charts are displayed by TradingView's official Advanced Chart
+  widget: BTC/ETH/SOL use Binance symbols, EURUSD uses `FX:EURUSD`, XAUUSD uses
+  `FX_IDC:XAUUSD`, and AAPL/NVDA use their NASDAQ symbols. Custom demo symbols
+  continue to use the Atlas demo chart. TradingView chart prices may differ from
+  Atlas quotes. Copy the FIX price-connection settings from cTrader into
+  `.env.local` using the names in `.env.example`; use the SSL price port, not the
+  trading port.
   `FXPRO_FIX_XAUUSD_SYMBOL_ID` is the numeric instrument ID supplied by
   FxPro/Spotware, not the text `XAUUSD`. Keep the FIX password server-side and
   never use a `NEXT_PUBLIC_` prefix.
@@ -50,13 +52,16 @@ usage monitoring.
   that supports long-lived HTTP streams; serverless function time limits may
   interrupt the connection. Credentials are only read by the server. Protect a
   deployed app with access control; otherwise visitors could use its FIX feed.
-- The TradingView chart is an embedded widget and does not expose its OHLC
-  history to Atlas. Atlas indicators and Gemini analysis are therefore
-  unavailable for XAUUSD. FIX spot quotes do not provide historical intraday
-  candles, traded volume, or transaction-by-transaction bid/ask data. Order
-  blocks, when available, use only FIX quotes received since connecting.
-  Volume profile, DOM depth, and footprint are unavailable for XAUUSD.
-- Other watchlist symbols continue to use illustrative demo prices and candles.
+- TradingView charts are embedded widgets and do not expose their OHLC history
+  to Atlas. Atlas indicators and Gemini analysis use separate Atlas feeds and
+  may differ from the displayed chart; they are disabled for XAUUSD. FIX spot
+  quotes do not provide historical intraday candles, traded volume, or
+  transaction-by-transaction bid/ask data. Order blocks, when available, use
+  only FIX quotes received since connecting. Volume profile, DOM depth, and
+  footprint are unavailable for XAUUSD.
+- For symbols without an Atlas live feed, Atlas-side quotes and analysis continue
+  to use illustrative demo prices; the TradingView widget still displays its
+  mapped external chart.
 - DOM and footprint are available only for those Binance symbols. Order blocks
   are heuristic zones; the volume profile allocates each candle's volume evenly
   across its high-low range, so it is an estimate rather than tick-level data.
