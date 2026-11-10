@@ -424,6 +424,8 @@ export default function MarketApp() {
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [fxProCandles, setFxProCandles] = useState<Candle[]>([]);
+  const [xauHistoryError, setXauHistoryError] = useState("");
+  const [isXauHistoryLoading, setIsXauHistoryLoading] = useState(false);
   const [marketDataError, setMarketDataError] = useState("");
   const [isMarketDataLoading, setIsMarketDataLoading] = useState(false);
   const [liveConnection, setLiveConnection] = useState<"connecting" | "live" | "reconnecting" | "demo">("demo");
@@ -523,6 +525,63 @@ export default function MarketApp() {
   }, [activeSymbol, timeframe]);
 
   useEffect(() => {
+    if (activeSymbol !== "XAUUSD") {
+      setXauHistoryError("");
+      setIsXauHistoryLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let active = true;
+    setIsXauHistoryLoading(true);
+    setXauHistoryError("");
+
+    const loadHistory = async () => {
+      try {
+        const response = await fetch(
+          `/api/xau-history?timeframe=${encodeURIComponent(timeframe)}`,
+          { signal: controller.signal, cache: "no-store" },
+        );
+        const result: unknown = await response.json();
+        if (!result || typeof result !== "object") throw new Error("Respons histori XAUUSD tidak valid.");
+        const data = result as { candles?: Candle[]; error?: string };
+        if (!response.ok) throw new Error(data.error ?? "Histori XAUUSD tidak tersedia.");
+        if (!Array.isArray(data.candles) || data.candles.some((candle) =>
+          !Number.isFinite(candle.time)
+          || ![candle.open, candle.high, candle.low, candle.close].every(Number.isFinite),
+        )) {
+          throw new Error("Struktur histori XAUUSD tidak valid.");
+        }
+        if (!active) return;
+
+        const step = stepByTimeframe[timeframe];
+        const currentBucket = Math.floor(Date.now() / 1000 / step) * step;
+        const history = data.candles.filter((candle) => (candle.time as number) < currentBucket);
+        setFxProCandles((current) => {
+          const merged = new Map(history.map((candle) => [candle.time as number, candle]));
+          for (const candle of current) {
+            if ((candle.time as number) >= currentBucket - step) {
+              merged.set(candle.time as number, candle);
+            }
+          }
+          return [...merged.values()].sort((a, b) => (a.time as number) - (b.time as number)).slice(-120);
+        });
+      } catch (error) {
+        if (!active || (error instanceof Error && error.name === "AbortError")) return;
+        setXauHistoryError(error instanceof Error ? error.message : "Histori XAUUSD tidak tersedia.");
+      } finally {
+        if (active) setIsXauHistoryLoading(false);
+      }
+    };
+
+    void loadHistory();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [activeSymbol, timeframe]);
+
+  useEffect(() => {
     const exchangeSymbol = liveSymbols[activeSymbol];
     const isFxProSymbol = activeSymbol === "XAUUSD";
     if (!exchangeSymbol && !isFxProSymbol) {
@@ -618,7 +677,7 @@ export default function MarketApp() {
               close: price,
             }];
           }
-          const open = last?.close ?? price;
+          const open = price;
           return [...current, {
             time: bucket as UTCTimestamp,
             open,
@@ -983,7 +1042,8 @@ export default function MarketApp() {
             <MarketChart candles={candles} showVolume={showVolume && activeSymbol !== "XAUUSD"} showEma={showEma} drawingTool={drawingTool} symbol={instrument.symbol} onChartReady={onChartReady} />
           </div>
 
-          <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span><span><i className="legend-line" /> EMA 20</span><span className="legend-demo">{isBinanceLive ? `Binance Spot · last trade ${new Date(lastTickAt!).toLocaleTimeString()}` : isFxProLive ? `FxPro FIX midpoint · candles since connection · ${new Date(lastTickAt!).toLocaleTimeString()}` : activeSymbol === "XAUUSD" ? "Demo candles until FxPro FIX sends the first quote" : activeMarketData ? "Binance Spot · waiting for trade tick" : "Illustrative demo data · Not live market prices"}</span></div>
+          <div className="chart-legend"><span><i className="legend-candle up" /> Bull candle</span><span><i className="legend-candle down" /> Bear candle</span><span><i className="legend-line" /> EMA 20</span><span className="legend-demo">{isBinanceLive ? `Binance Spot · last trade ${new Date(lastTickAt!).toLocaleTimeString()}` : isFxProLive ? `Yahoo GC=F history · FxPro FIX live · ${new Date(lastTickAt!).toLocaleTimeString()}` : activeSymbol === "XAUUSD" ? (isXauHistoryLoading ? "Loading COMEX gold futures history…" : xauHistoryError ? "Historical gold data unavailable" : "Yahoo Finance · COMEX Gold Futures · waiting for FxPro FIX live quote") : activeMarketData ? "Binance Spot · waiting for trade tick" : "Illustrative demo data · Not live market prices"}</span></div>
+          {activeSymbol === "XAUUSD" && xauHistoryError && <p className="data-error" role="status">{xauHistoryError}</p>}
 
           <section className="analysis-table-panel">
             <div className="analysis-section-heading">
@@ -995,7 +1055,7 @@ export default function MarketApp() {
                 </button>
               </div>
             </div>
-            {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">{isFxProLive ? "Indikator XAUUSD dihitung dari kuotasi FIX sejak koneksi; riwayat intraday tidak tersedia." : "Indikator XAUUSD menunggu kuotasi FxPro FIX; nilai belum bersumber dari harga live."}</p>}
+            {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">{isFxProLive ? "Candle historis memakai GC=F (futures emas COMEX) dan candle berjalan memakai kuotasi FxPro FIX; indikator dapat mencerminkan perbedaan harga kedua instrumen." : "Histori menggunakan GC=F (futures emas COMEX), bukan XAUUSD spot FxPro. Harga historis dapat berbeda; candle live akan mengikuti kuotasi FxPro FIX setelah tersambung."}</p>}
             <div className="indicator-grid">
               <div className="indicator-cell"><span>RSI · 14</span><strong className={analysis.rsi14 >= 70 ? "negative" : analysis.rsi14 <= 30 ? "positive" : ""}>{analysis.rsi14.toFixed(1)}</strong><small>{analysis.rsi14 >= 70 ? "Overbought zone" : analysis.rsi14 <= 30 ? "Oversold zone" : "Neutral momentum"}</small></div>
               <div className="indicator-cell"><span>MACD · 12/26/9</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "+" : ""}{money(analysis.macdHistogram, instrument.decimals)}</strong><small>{analysis.macdHistogram >= 0 ? "Positive momentum" : "Negative momentum"}</small></div>
