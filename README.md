@@ -1,6 +1,6 @@
 # Atlas — Market Intelligence
 
-A Next.js market-analysis and paper-trading interface.
+A Next.js market-analysis dashboard.
 
 ## Run locally
 
@@ -77,23 +77,18 @@ External data feeds can be unavailable or rate-limited; the UI reports
 market-data errors and distinguishes TradingView charts from Atlas analysis
 feeds.
 
-## Paper-trading scope
+## Dashboard scope
 
 - TradingView Advanced Chart embed with interactive chart controls.
 - Searchable watchlist; Atlas quotes are shown only for the selected crypto
   symbol when Binance data loads or for XAUUSD when FIX quotes are received.
-- Paper long/short positions, close-position P&L, and order history saved in
-  browser local storage.
-- Responsive dashboard for account and simulated market overview.
+- Responsive dashboard for market analysis and research.
 
-Paper trades are not real orders. Instruments without a connected Atlas quote
-may still use simulated prices for paper trading. The FxPro FIX connection is
-read-only market data and does not route orders. Production readiness for this
-signal-focused product requires reliable, appropriately licensed market data,
-validated and explainable signals, and operational/security controls. User
-accounts and server-side storage are needed for personalized saved features.
-Real order execution and a real-funds ledger are outside the current product
-scope.
+The FxPro FIX connection is read-only market data and does not route orders.
+The dashboard does not provide simulated or real order execution. Production
+readiness for this signal-focused product requires reliable, appropriately
+licensed market data, validated and explainable signals, and
+operational/security controls.
 
 ## AI task tracker and roadmap
 
@@ -139,7 +134,7 @@ candle backfill.
 
 ### Explicitly out of scope for current product
 - [x] Real broker/exchange order execution and automated trading. Revisit only if the product scope changes; it requires a separate security, risk, and compliance review.
-- [x] A trading account ledger for real funds. The existing paper-trading feature is simulation, not a real account or broker connection.
+- [x] A trading account ledger for real funds; account and order execution features are outside the current product scope.
 
 ### Existing foundation
 - [x] Define the product as signal-driven decision support with manual user decision-making.
@@ -148,7 +143,6 @@ candle backfill.
 - [x] Document FX/XAUUSD data flow, FIX connection requirements, and known limitations.
 - [x] Add technical-analysis calculations for trend, momentum, support, resistance, and bias.
 - [x] Document macro-data sources and their limitations.
-- [x] Add paper-trading simulation and browser-local position/trade-history tracking.
 - [x] Add price alerts checked while the dashboard is open.
 
 ### Completion rule

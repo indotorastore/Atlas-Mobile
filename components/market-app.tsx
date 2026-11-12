@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BACKTEST_RULE_VERSION,
   type BacktestResult,
@@ -42,25 +42,6 @@ type PriceAlert = {
   direction: "above" | "below";
   target: number;
   triggered: boolean;
-};
-type PaperPosition = {
-  id: string;
-  symbol: string;
-  side: "long" | "short";
-  quantity: number;
-  entryPrice: number;
-  markPrice: number;
-  openedAt: number;
-};
-type ClosedPaperTrade = PaperPosition & {
-  exitPrice: number;
-  pnl: number;
-  closedAt: number;
-};
-type PaperAccount = {
-  balance: number;
-  positions: PaperPosition[];
-  history: ClosedPaperTrade[];
 };
 type FxProQuote = { bid: number; ask: number };
 type MacroData = {
@@ -109,42 +90,6 @@ const tradingViewSymbols: Record<string, string> = {
 };
 const money = (value: number, digits = 2) =>
   new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
-const usd = (value: number) => `${value < 0 ? "-$" : "$"}${money(Math.abs(value))}`;
-const initialPaperAccount: PaperAccount = { balance: 100_000, positions: [], history: [] };
-const paperAccountStorageKey = "atlas-paper-account-v1";
-
-function isPaperAccount(value: unknown): value is PaperAccount {
-  if (!value || typeof value !== "object") return false;
-  const account = value as Partial<PaperAccount>;
-  const validPosition = (position: unknown): position is PaperPosition => {
-    if (!position || typeof position !== "object") return false;
-    const item = position as Partial<PaperPosition>;
-    return typeof item.id === "string"
-      && typeof item.symbol === "string"
-      && (item.side === "long" || item.side === "short")
-      && typeof item.quantity === "number" && Number.isFinite(item.quantity) && item.quantity > 0
-      && typeof item.entryPrice === "number" && Number.isFinite(item.entryPrice) && item.entryPrice > 0
-      && typeof item.markPrice === "number" && Number.isFinite(item.markPrice) && item.markPrice > 0
-      && typeof item.openedAt === "number" && Number.isFinite(item.openedAt);
-  };
-  const validClosedTrade = (trade: unknown): trade is ClosedPaperTrade => {
-    if (!trade || typeof trade !== "object") return false;
-    const item = trade as Partial<ClosedPaperTrade>;
-    const hasClosedFields = typeof item.exitPrice === "number" && Number.isFinite(item.exitPrice) && item.exitPrice > 0
-      && typeof item.pnl === "number" && Number.isFinite(item.pnl)
-      && typeof item.closedAt === "number" && Number.isFinite(item.closedAt);
-    return hasClosedFields && validPosition(item);
-  };
-  return typeof account.balance === "number" && Number.isFinite(account.balance) && account.balance >= 0
-    && Array.isArray(account.positions) && account.positions.every(validPosition)
-    && Array.isArray(account.history) && account.history.every(validClosedTrade);
-}
-
-function paperPnl(position: PaperPosition) {
-  const move = position.markPrice - position.entryPrice;
-  return (position.side === "long" ? move : -move) * position.quantity;
-}
-
 function calculateVolumeProfile(candles: Candle[], bucketCount = 12) {
   if (candles.length === 0) return [];
   const low = Math.min(...candles.map((candle) => candle.low));
@@ -259,7 +204,7 @@ export default function MarketApp() {
   const [timeframe, setTimeframe] = useState<Timeframe>("1H");
   const [search, setSearch] = useState("");
   const [showWatchlist, setShowWatchlist] = useState(true);
-  const [showAccount, setShowAccount] = useState(true);
+  const [showAnalysis, setShowAnalysis] = useState(true);
   const [activeNav, setActiveNav] = useState("overview");
   const [geminiAnalysis, setGeminiAnalysis] = useState("");
   const [geminiError, setGeminiError] = useState("");
@@ -285,17 +230,10 @@ export default function MarketApp() {
   const [alertTarget, setAlertTarget] = useState("");
   const [alertDirection, setAlertDirection] = useState<PriceAlert["direction"]>("above");
   const [marketPanel, setMarketPanel] = useState<"order-block" | "dom" | "profile" | "footprint">("dom");
-  const [paperAccount, setPaperAccount] = useState<PaperAccount>(initialPaperAccount);
-  const [paperAccountReady, setPaperAccountReady] = useState(false);
-  const [paperSide, setPaperSide] = useState<PaperPosition["side"]>("long");
-  const [paperQuantity, setPaperQuantity] = useState("0.01");
-  const [paperOrderError, setPaperOrderError] = useState("");
-  const [paperOrderMessage, setPaperOrderMessage] = useState("");
   const geminiRequestIdRef = useRef(0);
   const backtestRequestIdRef = useRef(0);
   const liveBaselineRef = useRef(0);
   const fxProReferencePriceRef = useRef<number | null>(null);
-  const lastPaperMarkUpdateRef = useRef(0);
   const instrument = instruments.find((item) => item.symbol === activeSymbol) ?? instruments[0];
   const activeMarketData = marketData?.symbol === activeSymbol && marketData.timeframe === timeframe ? marketData : null;
   const analysisCandles = useMemo(
@@ -367,35 +305,14 @@ export default function MarketApp() {
   const filteredInstruments = instruments.filter((item) =>
     `${item.symbol} ${item.name}`.toLowerCase().includes(search.toLowerCase()),
   );
-  const paperReserved = paperAccount.positions.reduce((sum, position) => sum + position.quantity * position.entryPrice, 0);
-  const paperUnrealized = paperAccount.positions.reduce((sum, position) => sum + paperPnl(position), 0);
-  const paperEquity = paperAccount.balance + paperUnrealized;
-  const paperBuyingPower = Math.max(0, paperAccount.balance - paperReserved);
-  const paperOrderAmount = Number(paperQuantity) * instrument.price;
-  const isPaperMarketLive = isBinanceLive || isFxProLive;
-  const selectedPaperPositions = paperAccount.positions.filter((position) => position.symbol === activeSymbol);
-
-  const markPaperPositions = useCallback((symbol: string, price: number) => {
-    const now = Date.now();
-    if (now - lastPaperMarkUpdateRef.current < 1_000) return;
-    lastPaperMarkUpdateRef.current = now;
-    setPaperAccount((current) => {
-      let changed = false;
-      const positions = current.positions.map((position) => {
-        if (position.symbol !== symbol || position.markPrice === price) return position;
-        changed = true;
-        return { ...position, markPrice: price };
-      });
-      return changed ? { ...current, positions } : current;
-    });
-  }, []);
+  const isLiveMarket = isBinanceLive || isFxProLive;
 
   useEffect(() => {
     if (window.matchMedia("(max-width: 760px)").matches) setShowWatchlist(false);
   }, []);
 
   useEffect(() => {
-    const sections = ["overview", "chart", "order-flow", "portfolio", "alerts", "macro"]
+    const sections = ["overview", "chart", "order-flow", "alerts", "macro"]
       .map((id) => document.getElementById(id))
       .filter((section): section is HTMLElement => section !== null);
     const observer = new IntersectionObserver((entries) => {
@@ -407,30 +324,6 @@ export default function MarketApp() {
     sections.forEach((section) => observer.observe(section));
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(paperAccountStorageKey);
-      if (saved) {
-        const parsed: unknown = JSON.parse(saved);
-        if (!isPaperAccount(parsed)) throw new Error("Format akun simulasi tidak valid.");
-        setPaperAccount(parsed);
-      }
-    } catch (error) {
-      setPaperOrderError(error instanceof Error ? error.message : "Akun simulasi tidak dapat dibaca.");
-    } finally {
-      setPaperAccountReady(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!paperAccountReady) return;
-    try {
-      localStorage.setItem(paperAccountStorageKey, JSON.stringify(paperAccount));
-    } catch {
-      setPaperOrderError("Akun simulasi tidak dapat disimpan di browser ini.");
-    }
-  }, [paperAccount, paperAccountReady]);
 
   useEffect(() => {
     try {
@@ -501,7 +394,6 @@ export default function MarketApp() {
         setMarketData(liveData);
         setMarketDataError("");
         liveBaselineRef.current = data.currentPrice - data.change;
-        markPaperPositions(activeSymbol, data.currentPrice);
         setInstruments((current) => current.map((item) => item.symbol === activeSymbol
           ? { ...item, price: data.currentPrice, change: data.change, changePct: data.changePct }
           : item));
@@ -518,7 +410,7 @@ export default function MarketApp() {
       controller?.abort();
       window.clearInterval(intervalId);
     };
-  }, [activeSymbol, markPaperPositions, timeframe]);
+  }, [activeSymbol, timeframe]);
 
   useEffect(() => {
     const exchangeSymbol = liveSymbols[activeSymbol];
@@ -604,7 +496,6 @@ export default function MarketApp() {
         setMarketDataError("");
         setLastTickAt(tickTime);
         setFxProQuote({ bid, ask });
-        markPaperPositions("XAUUSD", price);
         setFxProCandles((current) => {
           const bucket = Math.floor(tickTime / 1_000 / stepByTimeframe[timeframe]) * stepByTimeframe[timeframe];
           const last = current[current.length - 1];
@@ -738,7 +629,6 @@ export default function MarketApp() {
           const baseline = liveBaselineRef.current;
           const change = baseline > 0 ? latestTrade.price - baseline : 0;
           const changePct = baseline > 0 ? change / baseline * 100 : 0;
-          markPaperPositions(activeSymbol, latestTrade.price);
           setInstruments((current) => current.map((item) => item.symbol === activeSymbol
             ? { ...item, price: latestTrade.price, change, changePct }
             : item));
@@ -766,7 +656,7 @@ export default function MarketApp() {
       socket?.close();
       fxProSource?.close();
     };
-  }, [activeSymbol, markPaperPositions, timeframe]);
+  }, [activeSymbol, timeframe]);
 
   useEffect(() => {
     let active = true;
@@ -941,63 +831,6 @@ export default function MarketApp() {
     setAlertTarget("");
   };
 
-  const submitPaperOrder = () => {
-    const quantity = Number(paperQuantity);
-    if (!paperAccountReady) {
-      setPaperOrderError("Akun simulasi masih dimuat.");
-      return;
-    }
-    if (!isPaperMarketLive) {
-      setPaperOrderError("Order simulasi hanya aktif saat quote live tersedia.");
-      return;
-    }
-    if (!Number.isFinite(quantity) || quantity <= 0) {
-      setPaperOrderError("Masukkan ukuran order yang valid.");
-      return;
-    }
-    const amount = quantity * instrument.price;
-    if (!Number.isFinite(amount) || amount > paperBuyingPower) {
-      setPaperOrderError("Nilai order melebihi buying power akun simulasi.");
-      return;
-    }
-    const position: PaperPosition = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      symbol: activeSymbol,
-      side: paperSide,
-      quantity,
-      entryPrice: instrument.price,
-      markPrice: instrument.price,
-      openedAt: Date.now(),
-    };
-    setPaperAccount((current) => ({ ...current, positions: [position, ...current.positions] }));
-    setPaperOrderError("");
-    setPaperOrderMessage(`${paperSide === "long" ? "Buy long" : "Sell short"} ${quantity} ${activeSymbol} · paper order`);
-  };
-
-  const closePaperPosition = (position: PaperPosition) => {
-    if (position.symbol !== activeSymbol || !isPaperMarketLive) {
-      setPaperOrderError(`Pilih ${position.symbol} dan tunggu quote live untuk menutup posisi.`);
-      return;
-    }
-    const exitPrice = instrument.price;
-    const pnl = (position.side === "long" ? exitPrice - position.entryPrice : position.entryPrice - exitPrice) * position.quantity;
-    const closedTrade: ClosedPaperTrade = { ...position, exitPrice, pnl, closedAt: Date.now() };
-    setPaperAccount((current) => ({
-      balance: current.balance + pnl,
-      positions: current.positions.filter((item) => item.id !== position.id),
-      history: [closedTrade, ...current.history].slice(0, 30),
-    }));
-    setPaperOrderError("");
-    setPaperOrderMessage(`Posisi ${position.symbol} ditutup · ${usd(pnl)} USD`);
-  };
-
-  const setPaperSize = (fraction: number) => {
-    if (instrument.price <= 0) return;
-    const quantity = Math.floor((paperBuyingPower * fraction / instrument.price) * 1e8) / 1e8;
-    setPaperQuantity(String(quantity));
-    setPaperOrderError("");
-  };
-
   const addInstrument = () => {
     const symbol = search.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (!symbol || instruments.some((item) => item.symbol === symbol)) return;
@@ -1015,29 +848,28 @@ export default function MarketApp() {
           <span>ATLAS</span>
           <span className="brand-tag">TRADING DESK</span>
         </a>
-        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {isPaperMarketLive ? "LIVE QUOTE" : "MARKET DATA"} <span className="topbar-divider">·</span> {tradingViewSymbol}</div>
+        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {isLiveMarket ? "LIVE QUOTE" : "MARKET DATA"} <span className="topbar-divider">·</span> {tradingViewSymbol}</div>
         <div className="topbar-actions">
           <a className="icon-button" href="#alerts" aria-label="Price alerts"><Icon name="bell" /></a>
           <button className="icon-button" aria-label="Settings"><Icon name="settings" /></button>
           <button className="icon-button" aria-label={`${showWatchlist ? "Hide" : "Show"} watchlist`} aria-controls="watchlist-sidebar" aria-expanded={showWatchlist} title={`${showWatchlist ? "Hide" : "Show"} watchlist`} onClick={() => setShowWatchlist((visible) => !visible)}><Icon name="panel-left" /></button>
-          <button className="icon-button" aria-label={`${showAccount ? "Hide" : "Show"} account sidebar`} aria-controls="account-sidebar" aria-expanded={showAccount} title={`${showAccount ? "Hide" : "Show"} account sidebar`} onClick={() => setShowAccount((visible) => !visible)}><Icon name="panel-right" /></button>
+          <button className="icon-button" aria-label={`${showAnalysis ? "Hide" : "Show"} analysis sidebar`} aria-controls="analysis-sidebar" aria-expanded={showAnalysis} title={`${showAnalysis ? "Hide" : "Show"} analysis sidebar`} onClick={() => setShowAnalysis((visible) => !visible)}><Icon name="panel-right" /></button>
           <div className="avatar">JD</div>
         </div>
       </header>
 
-      <div className={`workspace ${showWatchlist ? "" : "watchlist-hidden"} ${showAccount ? "" : "account-hidden"}`}>
+      <div className={`workspace ${showWatchlist ? "" : "watchlist-hidden"} ${showAnalysis ? "" : "analysis-hidden"}`}>
         <aside className="app-navigation" aria-label="Main menu">
           <span className="nav-section-label">TRADE</span>
           <a href="#overview" className={activeNav === "overview" ? "active" : ""} aria-current={activeNav === "overview" ? "location" : undefined} onClick={() => setActiveNav("overview")}><Icon name="dashboard" size={17} /><span>Overview</span></a>
           <a href="#chart" className={activeNav === "chart" ? "active" : ""} aria-current={activeNav === "chart" ? "location" : undefined} onClick={() => setActiveNav("chart")}><Icon name="chart" size={17} /><span>Chart</span></a>
           <a href="#order-flow" className={activeNav === "order-flow" ? "active" : ""} aria-current={activeNav === "order-flow" ? "location" : undefined} onClick={() => setActiveNav("order-flow")}><Icon name="layers" size={17} /><span>Order flow</span></a>
-          <a href="#portfolio" className={activeNav === "portfolio" ? "active" : ""} aria-current={activeNav === "portfolio" ? "location" : undefined} onClick={() => setActiveNav("portfolio")}><Icon name="wallet" size={17} /><span>Portfolio</span></a>
           <span className="nav-section-label nav-research-label">RESEARCH</span>
           <a href="#alerts" className={activeNav === "alerts" ? "active" : ""} aria-current={activeNav === "alerts" ? "location" : undefined} onClick={() => setActiveNav("alerts")}><Icon name="bell" size={17} /><span>Price alerts</span>{currentAlerts.length > 0 && <small>{currentAlerts.length}</small>}</a>
           <a href="#macro" className={activeNav === "macro" ? "active" : ""} aria-current={activeNav === "macro" ? "location" : undefined} onClick={() => setActiveNav("macro")}><Icon name="globe" size={17} /><span>Macro data</span></a>
           <div className="nav-bottom">
-            <span className={`nav-connection ${isPaperMarketLive ? "live" : ""}`} />
-            <div><strong>{isPaperMarketLive ? "Feed connected" : "Feed standby"}</strong><small>{isPaperMarketLive ? "Quotes streaming" : "Waiting for live quote"}</small></div>
+            <span className={`nav-connection ${isLiveMarket ? "live" : ""}`} />
+            <div><strong>{isLiveMarket ? "Feed connected" : "Feed standby"}</strong><small>{isLiveMarket ? "Quotes streaming" : "Waiting for live quote"}</small></div>
           </div>
         </aside>
 
@@ -1121,58 +953,6 @@ export default function MarketApp() {
             )}
           </section>
 
-          <section className="paper-portfolio-panel" id="portfolio">
-            <div className="analysis-section-heading">
-              <div><span className="eyebrow">SIMULATED ACCOUNT · USD</span><h2>Portfolio &amp; positions</h2></div>
-              <span className="analysis-timeframe">{paperAccount.positions.length} open · {paperAccount.history.length} closed</span>
-            </div>
-            <div className="paper-stats">
-              <div><span>Equity</span><strong>{usd(paperEquity)}</strong></div>
-              <div><span>Buying power</span><strong>{usd(paperBuyingPower)}</strong></div>
-              <div><span>Open P&amp;L</span><strong className={paperUnrealized >= 0 ? "positive" : "negative"}>{paperUnrealized >= 0 ? "+" : ""}{usd(paperUnrealized)}</strong></div>
-            </div>
-            <div className="paper-table-wrap">
-              <div className="paper-table">
-                <div className="paper-row paper-labels"><span>MARKET / SIDE</span><span>SIZE</span><span>ENTRY</span><span>MARK</span><span>UNREALIZED</span><span /></div>
-                {paperAccount.positions.map((position) => {
-                  const currentMark = position.symbol === activeSymbol && isPaperMarketLive ? instrument.price : position.markPrice;
-                  const pnl = (position.side === "long" ? currentMark - position.entryPrice : position.entryPrice - currentMark) * position.quantity;
-                  return (
-                    <div className="paper-row" key={position.id}>
-                      <span className="paper-market"><strong>{position.symbol}</strong><small className={position.side}>{position.side.toUpperCase()}</small></span>
-                      <span>{position.quantity}</span>
-                      <span>{money(position.entryPrice, instruments.find((item) => item.symbol === position.symbol)?.decimals ?? 2)}</span>
-                      <span>{money(currentMark, instruments.find((item) => item.symbol === position.symbol)?.decimals ?? 2)}</span>
-                      <strong className={pnl >= 0 ? "positive" : "negative"}>{pnl >= 0 ? "+" : ""}{usd(pnl)}</strong>
-                      {position.symbol !== activeSymbol
-                        ? <button className="paper-close" onClick={() => setActiveSymbol(position.symbol)}>Select</button>
-                        : <button className="paper-close" disabled={!isPaperMarketLive} onClick={() => closePaperPosition(position)}>{isPaperMarketLive ? "Close" : "Wait"}</button>}
-                    </div>
-                  );
-                })}
-                {paperAccount.positions.length === 0 && <p className="data-empty">Belum ada posisi simulasi. Gunakan ticket saat quote live tersedia.</p>}
-              </div>
-            </div>
-            {paperAccount.history.length > 0 && (
-              <details className="paper-history">
-                <summary>Riwayat transaksi · {paperAccount.history.length} terakhir</summary>
-                <div className="paper-table">
-                  {paperAccount.history.slice(0, 8).map((trade) => (
-                    <div className="paper-row history-row" key={trade.id}>
-                      <span className="paper-market"><strong>{trade.symbol}</strong><small className={trade.side}>{trade.side.toUpperCase()} · ditutup {new Date(trade.closedAt).toLocaleDateString("id-ID")}</small></span>
-                      <span>{trade.quantity}</span>
-                      <span>{money(trade.entryPrice, instruments.find((item) => item.symbol === trade.symbol)?.decimals ?? 2)}</span>
-                      <span>{money(trade.exitPrice, instruments.find((item) => item.symbol === trade.symbol)?.decimals ?? 2)}</span>
-                      <strong className={trade.pnl >= 0 ? "positive" : "negative"}>{trade.pnl >= 0 ? "+" : ""}{usd(trade.pnl)}</strong>
-                      <span />
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
-            <p className="tool-disclaimer">Saldo awal simulasi $100.000. Posisi dan riwayat tersimpan di browser ini; mark untuk market lain memakai quote terakhir yang diterima. Tidak terhubung ke broker dan tidak mengirim order nyata.</p>
-          </section>
-
           <section className="market-tools-panel" id="order-flow">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">MARKET MICROSTRUCTURE</span><h2>Order flow &amp; volume tools</h2></div>
@@ -1249,53 +1029,7 @@ export default function MarketApp() {
           </section>
         </section>
 
-        <aside id="account-sidebar" className={`account-panel analysis-panel ${showAccount ? "" : "closed"}`}>
-          <section className="paper-ticket" aria-labelledby="paper-ticket-heading">
-            <div className="paper-ticket-heading">
-              <div><span className="eyebrow">ORDER TICKET</span><h2 id="paper-ticket-heading">Paper trade</h2></div>
-              <span className="paper-badge">SIMULATOR</span>
-            </div>
-            <div className="ticket-account">
-              <div><span>Equity</span><strong>{usd(paperEquity)}</strong></div>
-              <div><span>Available</span><strong>{usd(paperBuyingPower)}</strong></div>
-            </div>
-            <div className="paper-side-switch" role="group" aria-label="Position direction">
-              <button type="button" className={paperSide === "long" ? "selected long" : ""} onClick={() => { setPaperSide("long"); setPaperOrderMessage(""); }}>Buy / Long</button>
-              <button type="button" className={paperSide === "short" ? "selected short" : ""} onClick={() => { setPaperSide("short"); setPaperOrderMessage(""); }}>Sell / Short</button>
-            </div>
-            <label className="paper-quantity-label" htmlFor="paper-quantity">Quantity · {activeSymbol}</label>
-            <div className="paper-quantity-input">
-              <input id="paper-quantity" inputMode="decimal" value={paperQuantity} onChange={(event) => { setPaperQuantity(event.target.value); setPaperOrderError(""); setPaperOrderMessage(""); }} aria-label="Paper order quantity" />
-              <span>units</span>
-            </div>
-            <div className="paper-size-buttons">
-              {[25, 50, 100].map((percent) => <button type="button" key={percent} onClick={() => setPaperSize(percent / 100)}>{percent}%</button>)}
-            </div>
-            <div className="paper-order-preview"><span>Est. notional</span><strong>{isPaperMarketLive && Number.isFinite(paperOrderAmount) ? usd(paperOrderAmount) : "Quote unavailable"}</strong></div>
-            <button
-              type="button"
-              className={`paper-submit ${paperSide}`}
-              disabled={!paperAccountReady || !isPaperMarketLive || !Number.isFinite(paperOrderAmount) || paperOrderAmount <= 0 || paperOrderAmount > paperBuyingPower}
-              onClick={submitPaperOrder}
-            >
-              {paperSide === "long" ? "Open long position" : "Open short position"}
-            </button>
-            {!isPaperMarketLive && <p className="paper-ticket-note">Menunggu quote live Binance atau FxPro FIX. Simulasi tidak memakai harga indikatif.</p>}
-            {paperOrderError && <p className="data-error" role="alert">{paperOrderError}</p>}
-            {paperOrderMessage && <p className="paper-order-message" role="status">{paperOrderMessage}</p>}
-            {selectedPaperPositions.length > 0 && (
-              <div className="ticket-positions">
-                <span>OPEN · {activeSymbol}</span>
-                {selectedPaperPositions.map((position) => (
-                  <div key={position.id}>
-                    <strong className={position.side}>{position.side.toUpperCase()} · {position.quantity}</strong>
-                    <button type="button" disabled={!isPaperMarketLive} onClick={() => closePaperPosition(position)}>Close</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <small className="paper-disclaimer">Paper only · 1× notional · tersimpan lokal · tidak ada order broker.</small>
-          </section>
+        <aside id="analysis-sidebar" className={`analysis-sidebar analysis-panel ${showAnalysis ? "" : "closed"}`}>
           {!isAnalysisInstrument ? (
             <section className="analysis-card xau-data-note">
               <div className="side-heading"><div><span className="eyebrow">ANALYSIS STATUS</span><h3>{instrument.symbol}</h3></div></div>
