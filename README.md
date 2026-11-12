@@ -88,6 +88,69 @@ feeds.
 
 Paper trades are not real orders. Instruments without a connected Atlas quote
 may still use simulated prices for paper trading. The FxPro FIX connection is
-read-only market data and does not route orders. A production trading app needs
-licensed market data for every asset, secure authentication, a server-side
-account ledger, and a separately reviewed broker integration.
+read-only market data and does not route orders. Production readiness for this
+signal-focused product requires reliable, appropriately licensed market data,
+validated and explainable signals, and operational/security controls. User
+accounts and server-side storage are needed for personalized saved features.
+Real order execution and a real-funds ledger are outside the current product
+scope.
+
+## AI task tracker and roadmap
+
+Atlas is a market-analysis and signal decision-support product: it presents BUY/SELL/neutral recommendations and their supporting data so people can make their own decisions. It does not place real orders. Follow the phases in order, keep unfinished work as `[ ]`, and change a task to `[x]` only after implementing and verifying it. If work is deferred or out of scope, record that explicitly.
+
+### Phase 1 — Trustworthy signal MVP (start here)
+- [x] Define a typed signal contract: symbol, timeframe, direction (BUY/SELL/NEUTRAL), generated/expiry timestamps, data source, and current-data status.
+- [x] Implement a deterministic, rule-based signal generator using the existing analysis calculations; do not present indicator bias alone as a BUY/SELL signal.
+- [x] Show the signal's rationale and inputs (trend, EMA, RSI, MACD, ATR, support/resistance, and volume where available), including unavailable or stale data.
+- [x] Define and display confidence semantics as a rule-alignment count, not a probability or claim of guaranteed accuracy.
+- [x] Add signal-focused unit tests for direction, neutral/insufficient data, stale data, and boundary cases.
+
+### Phase 2 — Evidence and evaluation
+- [x] Persist or otherwise reproducibly retain timestamped signal snapshots with the exact input candle/data range and signal-rule version.
+- [x] Add historical evaluation/backtesting that avoids look-ahead bias and accounts for fees/slippage assumptions; clearly label simulated results.
+- [x] Display outcome metrics by symbol and timeframe, with sample size, date range, and methodology so results are not misleading.
+- [x] Add data-quality checks for gaps, invalid values, source outages, and candle freshness; prevent or flag signals from unreliable inputs.
+
+Phase 2 implementation notes: signal snapshots are versioned and stored in the
+current browser only (up to 40 snapshots across symbols/timeframes); each keeps
+the exact candle input used when first observed for that bar. Backtests cover
+the latest 500 completed Binance candles for supported crypto pairs. Signals
+are calculated using candles available up to each decision point, entries are
+simulated at the next candle open, and non-overlapping trades exit after five
+candles. Reported net returns use fixed notional and the displayed fee/slippage
+assumptions; they exclude spread, funding, taxes, and actual exchange execution.
+This is an illustrative historical simulation, not a forecast or live track
+record. XAUUSD remains excluded because the current FIX feed has no historical
+candle backfill.
+
+### Phase 3 — Useful user workflows
+- [ ] Add watchlists and configurable signal/price alerts; make delivery failures and current alert status visible.
+- [ ] Add authenticated user accounts only when personalized saved state or alert delivery requires them.
+- [ ] Move user-specific watchlists, alert rules, and signal history to server-side storage with ownership checks and database migrations.
+- [ ] Add a user-visible history of generated signals and their rationale; preserve enough provenance to explain past outputs.
+
+### Phase 4 — Production readiness
+- [ ] Add automated unit, API/contract, and end-to-end coverage for the core signal and alert workflows.
+- [ ] Add security controls appropriate to the deployed features: input validation, authorization, rate limits, secure secret storage, and dependency updates.
+- [ ] Add operational observability: structured logs, service/data-feed health, error monitoring, and actionable alerts.
+- [ ] Add deployment pipeline, environment separation, backups/retention for persisted user data, and documented recovery procedures.
+- [ ] Review applicable legal, licensing, privacy, and compliance requirements for the target markets and jurisdictions; do not claim regulatory approval without review.
+
+### Explicitly out of scope for current product
+- [x] Real broker/exchange order execution and automated trading. Revisit only if the product scope changes; it requires a separate security, risk, and compliance review.
+- [x] A trading account ledger for real funds. The existing paper-trading feature is simulation, not a real account or broker connection.
+
+### Existing foundation
+- [x] Define the product as signal-driven decision support with manual user decision-making.
+- [x] Add Binance market-data integration for BTCUSD, ETHUSD, and SOLUSD.
+- [x] Add TradingView chart embedding and document that it is separate from Atlas analysis data.
+- [x] Document FX/XAUUSD data flow, FIX connection requirements, and known limitations.
+- [x] Add technical-analysis calculations for trend, momentum, support, resistance, and bias.
+- [x] Document macro-data sources and their limitations.
+- [x] Add paper-trading simulation and browser-local position/trade-history tracking.
+- [x] Add price alerts checked while the dashboard is open.
+
+### Completion rule
+
+Any future AI agent working on this repo must update this checklist as tasks are completed. When a task is done, change `[ ]` to `[x]`; when it is deferred or invalid, add a short note in the same bullet or in a related section explaining the decision.

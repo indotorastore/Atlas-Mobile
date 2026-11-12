@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test": "tsc lib/signal.ts lib/technical-analysis.ts lib/candle-quality.ts lib/backtest.ts lib/signal-snapshots.ts --target ES2022 --module commonjs --strict --skipLibCheck --outDir node_modules/.cache/atlas-signal-tests && node --test lib/signal.test.mjs",
     "lint": "next lint"
   },
   "dependencies": {

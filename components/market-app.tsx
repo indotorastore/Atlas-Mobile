@@ -1,16 +1,21 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
-
-type Candle = {
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-};
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  BACKTEST_RULE_VERSION,
+  type BacktestResult,
+} from "@/lib/backtest";
+import { validateCandles } from "@/lib/candle-quality";
+import {
+  createSignalSnapshot,
+  parseSignalSnapshots,
+  saveSignalSnapshot,
+  signalSnapshotsStorageKey,
+  type SignalSnapshot,
+} from "@/lib/signal-snapshots";
+import { generateSignal, type SignalDataStatus } from "@/lib/signal";
+import { calculateAnalysis, type Candle } from "@/lib/technical-analysis";
 type Instrument = {
   symbol: string;
   name: string;
@@ -18,19 +23,6 @@ type Instrument = {
   change: number;
   changePct: number;
   decimals: number;
-};
-type TechnicalAnalysis = {
-  ema20: number;
-  ema50: number;
-  rsi14: number;
-  macd: number;
-  macdSignal: number;
-  macdHistogram: number;
-  atr14: number;
-  support: number;
-  resistance: number;
-  trend: "Bullish" | "Bearish" | "Neutral";
-  bias: "Bullish" | "Bearish" | "Neutral";
 };
 type MarketData = {
   symbol: string;
@@ -50,6 +42,25 @@ type PriceAlert = {
   direction: "above" | "below";
   target: number;
   triggered: boolean;
+};
+type PaperPosition = {
+  id: string;
+  symbol: string;
+  side: "long" | "short";
+  quantity: number;
+  entryPrice: number;
+  markPrice: number;
+  openedAt: number;
+};
+type ClosedPaperTrade = PaperPosition & {
+  exitPrice: number;
+  pnl: number;
+  closedAt: number;
+};
+type PaperAccount = {
+  balance: number;
+  positions: PaperPosition[];
+  history: ClosedPaperTrade[];
 };
 type FxProQuote = { bid: number; ask: number };
 type MacroData = {
@@ -98,72 +109,40 @@ const tradingViewSymbols: Record<string, string> = {
 };
 const money = (value: number, digits = 2) =>
   new Intl.NumberFormat("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+const usd = (value: number) => `${value < 0 ? "-$" : "$"}${money(Math.abs(value))}`;
+const initialPaperAccount: PaperAccount = { balance: 100_000, positions: [], history: [] };
+const paperAccountStorageKey = "atlas-paper-account-v1";
 
-function ema(values: number[], period: number): number[] {
-  if (values.length === 0) return [];
-  const multiplier = 2 / (period + 1);
-  return values.map((value, index) =>
-    index === 0 ? value : value * multiplier + values[index - 1] * (1 - multiplier),
-  );
+function isPaperAccount(value: unknown): value is PaperAccount {
+  if (!value || typeof value !== "object") return false;
+  const account = value as Partial<PaperAccount>;
+  const validPosition = (position: unknown): position is PaperPosition => {
+    if (!position || typeof position !== "object") return false;
+    const item = position as Partial<PaperPosition>;
+    return typeof item.id === "string"
+      && typeof item.symbol === "string"
+      && (item.side === "long" || item.side === "short")
+      && typeof item.quantity === "number" && Number.isFinite(item.quantity) && item.quantity > 0
+      && typeof item.entryPrice === "number" && Number.isFinite(item.entryPrice) && item.entryPrice > 0
+      && typeof item.markPrice === "number" && Number.isFinite(item.markPrice) && item.markPrice > 0
+      && typeof item.openedAt === "number" && Number.isFinite(item.openedAt);
+  };
+  const validClosedTrade = (trade: unknown): trade is ClosedPaperTrade => {
+    if (!trade || typeof trade !== "object") return false;
+    const item = trade as Partial<ClosedPaperTrade>;
+    const hasClosedFields = typeof item.exitPrice === "number" && Number.isFinite(item.exitPrice) && item.exitPrice > 0
+      && typeof item.pnl === "number" && Number.isFinite(item.pnl)
+      && typeof item.closedAt === "number" && Number.isFinite(item.closedAt);
+    return hasClosedFields && validPosition(item);
+  };
+  return typeof account.balance === "number" && Number.isFinite(account.balance) && account.balance >= 0
+    && Array.isArray(account.positions) && account.positions.every(validPosition)
+    && Array.isArray(account.history) && account.history.every(validClosedTrade);
 }
 
-function calculateAnalysis(candles: Candle[]): TechnicalAnalysis {
-  if (candles.length === 0) {
-    return {
-      ema20: 0,
-      ema50: 0,
-      rsi14: 50,
-      macd: 0,
-      macdSignal: 0,
-      macdHistogram: 0,
-      atr14: 0,
-      support: 0,
-      resistance: 0,
-      trend: "Neutral",
-      bias: "Neutral",
-    };
-  }
-  const closes = candles.map((candle) => candle.close);
-  const ema20Series = ema(closes, 20);
-  const ema50Series = ema(closes, 50);
-  const ema26Series = ema(closes, 26);
-  const macdSeries = ema(closes, 12).map((value, index) => value - ema26Series[index]);
-  const macdSignalSeries = ema(macdSeries, 9);
-  const recent = candles.slice(-20);
-  const recentCloses = closes.slice(-15);
-  const changes = recentCloses.slice(1).map((close, index) => close - recentCloses[index]);
-  const gains = changes.map((change) => Math.max(change, 0));
-  const losses = changes.map((change) => Math.max(-change, 0));
-  const averageGain = gains.length ? gains.reduce((sum, value) => sum + value, 0) / gains.length : 0;
-  const averageLoss = losses.length ? losses.reduce((sum, value) => sum + value, 0) / losses.length : 0;
-  const rsi14 = averageLoss === 0 ? (averageGain === 0 ? 50 : 100) : 100 - 100 / (1 + averageGain / averageLoss);
-  const trueRanges = candles.slice(-14).map((candle, index, recentCandles) => {
-    const previousClose = recentCandles[index - 1]?.close ?? candles[candles.length - 15]?.close ?? candle.close;
-    return Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose));
-  });
-  const latest = closes[closes.length - 1];
-  const ema20 = ema20Series[ema20Series.length - 1];
-  const ema50 = ema50Series[ema50Series.length - 1];
-  const macd = macdSeries[macdSeries.length - 1];
-  const macdSignal = macdSignalSeries[macdSignalSeries.length - 1];
-  const trend = latest > ema20 && ema20 > ema50 ? "Bullish" : latest < ema20 && ema20 < ema50 ? "Bearish" : "Neutral";
-  const score = (trend === "Bullish" ? 1 : trend === "Bearish" ? -1 : 0)
-    + (rsi14 > 55 ? 1 : rsi14 < 45 ? -1 : 0)
-    + (macd > macdSignal ? 1 : macd < macdSignal ? -1 : 0);
-
-  return {
-    ema20,
-    ema50,
-    rsi14,
-    macd,
-    macdSignal,
-    macdHistogram: macd - macdSignal,
-    atr14: trueRanges.reduce((sum, value) => sum + value, 0) / trueRanges.length,
-    support: Math.min(...recent.map((candle) => candle.low)),
-    resistance: Math.max(...recent.map((candle) => candle.high)),
-    trend,
-    bias: score >= 2 ? "Bullish" : score <= -2 ? "Bearish" : "Neutral",
-  };
+function paperPnl(position: PaperPosition) {
+  const move = position.markPrice - position.entryPrice;
+  return (position.side === "long" ? move : -move) * position.quantity;
 }
 
 function calculateVolumeProfile(candles: Candle[], bucketCount = 12) {
@@ -256,6 +235,10 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const common = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   const paths: Record<string, React.ReactNode> = {
     chart: <><path d="M3 3v18h18" /><path d="m19 9-5 5-4-4-3 3" /></>,
+    dashboard: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="5" rx="1.5" /><rect x="13" y="10" width="8" height="11" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /></>,
+    layers: <><path d="m12 3 9 5-9 5-9-5 9-5Z" /><path d="m3 12 9 5 9-5M3 16l9 5 9-5" /></>,
+    wallet: <><rect x="3" y="5" width="18" height="15" rx="2" /><path d="M3 9h18M16 14h2" /><path d="M7 5V3h11" /></>,
+    globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
@@ -277,12 +260,20 @@ export default function MarketApp() {
   const [search, setSearch] = useState("");
   const [showWatchlist, setShowWatchlist] = useState(true);
   const [showAccount, setShowAccount] = useState(true);
+  const [activeNav, setActiveNav] = useState("overview");
   const [geminiAnalysis, setGeminiAnalysis] = useState("");
   const [geminiError, setGeminiError] = useState("");
   const [isGeminiLoading, setIsGeminiLoading] = useState(false);
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [fxProCandles, setFxProCandles] = useState<Candle[]>([]);
   const [marketDataError, setMarketDataError] = useState("");
+  const [signalSnapshots, setSignalSnapshots] = useState<SignalSnapshot[]>([]);
+  const [signalSnapshotsReady, setSignalSnapshotsReady] = useState(false);
+  const [signalSnapshotError, setSignalSnapshotError] = useState("");
+  const [signalSnapshotLoadFailed, setSignalSnapshotLoadFailed] = useState(false);
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const [backtestError, setBacktestError] = useState("");
+  const [isBacktestLoading, setIsBacktestLoading] = useState(false);
   const [liveConnection, setLiveConnection] = useState<"connecting" | "live" | "reconnecting" | "demo">("demo");
   const [lastTickAt, setLastTickAt] = useState<number | null>(null);
   const [fxProQuote, setFxProQuote] = useState<FxProQuote | null>(null);
@@ -294,9 +285,17 @@ export default function MarketApp() {
   const [alertTarget, setAlertTarget] = useState("");
   const [alertDirection, setAlertDirection] = useState<PriceAlert["direction"]>("above");
   const [marketPanel, setMarketPanel] = useState<"order-block" | "dom" | "profile" | "footprint">("dom");
+  const [paperAccount, setPaperAccount] = useState<PaperAccount>(initialPaperAccount);
+  const [paperAccountReady, setPaperAccountReady] = useState(false);
+  const [paperSide, setPaperSide] = useState<PaperPosition["side"]>("long");
+  const [paperQuantity, setPaperQuantity] = useState("0.01");
+  const [paperOrderError, setPaperOrderError] = useState("");
+  const [paperOrderMessage, setPaperOrderMessage] = useState("");
   const geminiRequestIdRef = useRef(0);
+  const backtestRequestIdRef = useRef(0);
   const liveBaselineRef = useRef(0);
   const fxProReferencePriceRef = useRef<number | null>(null);
+  const lastPaperMarkUpdateRef = useRef(0);
   const instrument = instruments.find((item) => item.symbol === activeSymbol) ?? instruments[0];
   const activeMarketData = marketData?.symbol === activeSymbol && marketData.timeframe === timeframe ? marketData : null;
   const analysisCandles = useMemo(
@@ -304,6 +303,46 @@ export default function MarketApp() {
     [activeMarketData, activeSymbol, fxProCandles],
   );
   const analysis = useMemo(() => calculateAnalysis(analysisCandles), [analysisCandles]);
+  const isAnalysisInstrument = Boolean(liveSymbols[activeSymbol]) || activeSymbol === "XAUUSD";
+  const isBinanceLive = Boolean(activeMarketData && liveSymbols[activeSymbol] && liveConnection === "live" && lastTickAt !== null);
+  const isFxProLive = activeSymbol === "XAUUSD" && liveConnection === "live" && lastTickAt !== null;
+  const candleQuality = useMemo(
+    () => validateCandles(analysisCandles, timeframe, { allowGaps: activeSymbol === "XAUUSD" }),
+    [activeSymbol, analysisCandles, timeframe],
+  );
+  const signalDataStatus: SignalDataStatus = useMemo(() => {
+    const now = Date.now();
+    if (liveSymbols[activeSymbol] && marketDataError) return "stale";
+    const observedAt = activeSymbol === "XAUUSD"
+      ? lastTickAt
+      : isBinanceLive
+        ? lastTickAt
+        : activeMarketData?.fetchedAt ?? null;
+    const maxAge = activeSymbol === "XAUUSD" || isBinanceLive ? 30_000 : 60_000;
+    if (observedAt === null) return "unavailable";
+    if (now < observedAt || now - observedAt > maxAge) return "stale";
+    return isBinanceLive || isFxProLive ? "live" : "delayed";
+  }, [activeMarketData, activeSymbol, isBinanceLive, isFxProLive, lastTickAt, marketDataError]);
+  const signal = useMemo(() => {
+    const latestCandle = analysisCandles.at(-1);
+    return generateSignal({
+      symbol: activeSymbol,
+      timeframe,
+      source: activeSymbol === "XAUUSD" ? "FxPro FIX midpoint" : "Binance Spot API",
+      analysis,
+      candleCount: analysisCandles.length,
+      latestClose: latestCandle?.close ?? null,
+      latestCandleTime: latestCandle?.time ?? null,
+      inputTimestamp: activeSymbol === "XAUUSD" || isBinanceLive
+        ? lastTickAt
+        : activeMarketData?.fetchedAt ?? null,
+      dataStatus: signalDataStatus,
+      dataQualityValid: candleQuality.valid,
+      dataQualityIssues: candleQuality.issues,
+      volumes: analysisCandles.slice(-20).map((candle) => candle.volume),
+      now: Date.now(),
+    });
+  }, [activeMarketData, activeSymbol, analysis, analysisCandles, candleQuality, isBinanceLive, lastTickAt, signalDataStatus, timeframe]);
   const volumeProfile = useMemo(() => calculateVolumeProfile(analysisCandles), [analysisCandles]);
   const orderBlocks = useMemo(() => findOrderBlocks(analysisCandles), [analysisCandles]);
   const footprint = useMemo(
@@ -311,9 +350,6 @@ export default function MarketApp() {
     [activeMarketData, instrument.decimals],
   );
   const tradingViewSymbol = tradingViewSymbols[activeSymbol] ?? activeSymbol;
-  const isAnalysisInstrument = Boolean(liveSymbols[activeSymbol]) || activeSymbol === "XAUUSD";
-  const isBinanceLive = Boolean(activeMarketData && liveSymbols[activeSymbol] && liveConnection === "live" && lastTickAt !== null);
-  const isFxProLive = activeSymbol === "XAUUSD" && liveConnection === "live" && lastTickAt !== null;
   const isXauAnalysisAvailable = isFxProLive && fxProCandles.length > 0;
   const isXauAnalysisReady = isFxProLive && fxProCandles.length >= 50;
   const isGeminiAnalysisReady = Boolean(
@@ -331,9 +367,110 @@ export default function MarketApp() {
   const filteredInstruments = instruments.filter((item) =>
     `${item.symbol} ${item.name}`.toLowerCase().includes(search.toLowerCase()),
   );
+  const paperReserved = paperAccount.positions.reduce((sum, position) => sum + position.quantity * position.entryPrice, 0);
+  const paperUnrealized = paperAccount.positions.reduce((sum, position) => sum + paperPnl(position), 0);
+  const paperEquity = paperAccount.balance + paperUnrealized;
+  const paperBuyingPower = Math.max(0, paperAccount.balance - paperReserved);
+  const paperOrderAmount = Number(paperQuantity) * instrument.price;
+  const isPaperMarketLive = isBinanceLive || isFxProLive;
+  const selectedPaperPositions = paperAccount.positions.filter((position) => position.symbol === activeSymbol);
+
+  const markPaperPositions = useCallback((symbol: string, price: number) => {
+    const now = Date.now();
+    if (now - lastPaperMarkUpdateRef.current < 1_000) return;
+    lastPaperMarkUpdateRef.current = now;
+    setPaperAccount((current) => {
+      let changed = false;
+      const positions = current.positions.map((position) => {
+        if (position.symbol !== symbol || position.markPrice === price) return position;
+        changed = true;
+        return { ...position, markPrice: price };
+      });
+      return changed ? { ...current, positions } : current;
+    });
+  }, []);
+
   useEffect(() => {
     if (window.matchMedia("(max-width: 760px)").matches) setShowWatchlist(false);
   }, []);
+
+  useEffect(() => {
+    const sections = ["overview", "chart", "order-flow", "portfolio", "alerts", "macro"]
+      .map((id) => document.getElementById(id))
+      .filter((section): section is HTMLElement => section !== null);
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((left, right) => right.intersectionRatio - left.intersectionRatio)[0];
+      if (visible) setActiveNav(visible.target.id);
+    }, { rootMargin: "-64px 0px -68% 0px", threshold: [0, 0.1, 0.25, 0.5] });
+    sections.forEach((section) => observer.observe(section));
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(paperAccountStorageKey);
+      if (saved) {
+        const parsed: unknown = JSON.parse(saved);
+        if (!isPaperAccount(parsed)) throw new Error("Format akun simulasi tidak valid.");
+        setPaperAccount(parsed);
+      }
+    } catch (error) {
+      setPaperOrderError(error instanceof Error ? error.message : "Akun simulasi tidak dapat dibaca.");
+    } finally {
+      setPaperAccountReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!paperAccountReady) return;
+    try {
+      localStorage.setItem(paperAccountStorageKey, JSON.stringify(paperAccount));
+    } catch {
+      setPaperOrderError("Akun simulasi tidak dapat disimpan di browser ini.");
+    }
+  }, [paperAccount, paperAccountReady]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(signalSnapshotsStorageKey);
+      if (saved) {
+        const snapshots = parseSignalSnapshots(saved);
+        setSignalSnapshots(snapshots);
+      }
+    } catch (error) {
+      setSignalSnapshotLoadFailed(true);
+      setSignalSnapshotError(error instanceof Error ? error.message : "Riwayat sinyal tidak dapat dibaca.");
+    } finally {
+      setSignalSnapshotsReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!signalSnapshotsReady || signalSnapshotLoadFailed) return;
+    try {
+      localStorage.setItem(signalSnapshotsStorageKey, JSON.stringify(signalSnapshots));
+    } catch {
+      setSignalSnapshotError("Snapshot sinyal tidak dapat disimpan di browser ini.");
+    }
+  }, [signalSnapshotLoadFailed, signalSnapshots, signalSnapshotsReady]);
+
+  useEffect(() => {
+    if (!signalSnapshotsReady || signalSnapshotLoadFailed || signal.status === "insufficient_data"
+      || signal.status === "invalid_data" || signal.status === "stale_data"
+      || signal.dataStatus === "stale" || signal.dataStatus === "unavailable") return;
+    const snapshot = createSignalSnapshot(signal, analysisCandles, Date.now());
+    if (!snapshot || signalSnapshots.some((item) => item.id === snapshot.id)) return;
+    setSignalSnapshots((current) => saveSignalSnapshot(current, snapshot));
+  }, [analysisCandles, signal, signalSnapshotLoadFailed, signalSnapshots, signalSnapshotsReady]);
+
+  useEffect(() => {
+    backtestRequestIdRef.current += 1;
+    setBacktestResult(null);
+    setBacktestError("");
+    setIsBacktestLoading(false);
+  }, [activeSymbol, timeframe]);
 
   useEffect(() => {
     if (!liveSymbols[activeSymbol]) {
@@ -364,6 +501,7 @@ export default function MarketApp() {
         setMarketData(liveData);
         setMarketDataError("");
         liveBaselineRef.current = data.currentPrice - data.change;
+        markPaperPositions(activeSymbol, data.currentPrice);
         setInstruments((current) => current.map((item) => item.symbol === activeSymbol
           ? { ...item, price: data.currentPrice, change: data.change, changePct: data.changePct }
           : item));
@@ -380,7 +518,7 @@ export default function MarketApp() {
       controller?.abort();
       window.clearInterval(intervalId);
     };
-  }, [activeSymbol, timeframe]);
+  }, [activeSymbol, markPaperPositions, timeframe]);
 
   useEffect(() => {
     const exchangeSymbol = liveSymbols[activeSymbol];
@@ -466,6 +604,7 @@ export default function MarketApp() {
         setMarketDataError("");
         setLastTickAt(tickTime);
         setFxProQuote({ bid, ask });
+        markPaperPositions("XAUUSD", price);
         setFxProCandles((current) => {
           const bucket = Math.floor(tickTime / 1_000 / stepByTimeframe[timeframe]) * stepByTimeframe[timeframe];
           const last = current[current.length - 1];
@@ -599,6 +738,7 @@ export default function MarketApp() {
           const baseline = liveBaselineRef.current;
           const change = baseline > 0 ? latestTrade.price - baseline : 0;
           const changePct = baseline > 0 ? change / baseline * 100 : 0;
+          markPaperPositions(activeSymbol, latestTrade.price);
           setInstruments((current) => current.map((item) => item.symbol === activeSymbol
             ? { ...item, price: latestTrade.price, change, changePct }
             : item));
@@ -626,7 +766,7 @@ export default function MarketApp() {
       socket?.close();
       fxProSource?.close();
     };
-  }, [activeSymbol, timeframe]);
+  }, [activeSymbol, markPaperPositions, timeframe]);
 
   useEffect(() => {
     let active = true;
@@ -704,6 +844,36 @@ export default function MarketApp() {
     setIsGeminiLoading(false);
   }, [activeSymbol, timeframe]);
 
+  const requestBacktest = async () => {
+    if (!liveSymbols[activeSymbol] || isBacktestLoading) return;
+    const requestId = ++backtestRequestIdRef.current;
+    setIsBacktestLoading(true);
+    setBacktestError("");
+    setBacktestResult(null);
+
+    try {
+      const response = await fetch(
+        `/api/backtest?symbol=${encodeURIComponent(activeSymbol)}&timeframe=${encodeURIComponent(timeframe)}`,
+        { cache: "no-store" },
+      );
+      const result: unknown = await response.json();
+      if (!result || typeof result !== "object") throw new Error("Respons backtest tidak valid.");
+      const data = result as BacktestResult & { error?: string };
+      if (!response.ok) throw new Error(data.error ?? "Backtest gagal dijalankan.");
+      if (typeof data.sampleSize !== "number" || typeof data.candleCount !== "number"
+        || typeof data.ruleVersion !== "string") {
+        throw new Error("Struktur hasil backtest tidak valid.");
+      }
+      if (requestId === backtestRequestIdRef.current) setBacktestResult(data);
+    } catch (error) {
+      if (requestId === backtestRequestIdRef.current) {
+        setBacktestError(error instanceof Error ? error.message : "Backtest gagal dijalankan.");
+      }
+    } finally {
+      if (requestId === backtestRequestIdRef.current) setIsBacktestLoading(false);
+    }
+  };
+
   const requestGeminiAnalysis = async () => {
     if (!isGeminiAnalysisReady) return;
     const requestId = ++geminiRequestIdRef.current;
@@ -771,6 +941,63 @@ export default function MarketApp() {
     setAlertTarget("");
   };
 
+  const submitPaperOrder = () => {
+    const quantity = Number(paperQuantity);
+    if (!paperAccountReady) {
+      setPaperOrderError("Akun simulasi masih dimuat.");
+      return;
+    }
+    if (!isPaperMarketLive) {
+      setPaperOrderError("Order simulasi hanya aktif saat quote live tersedia.");
+      return;
+    }
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setPaperOrderError("Masukkan ukuran order yang valid.");
+      return;
+    }
+    const amount = quantity * instrument.price;
+    if (!Number.isFinite(amount) || amount > paperBuyingPower) {
+      setPaperOrderError("Nilai order melebihi buying power akun simulasi.");
+      return;
+    }
+    const position: PaperPosition = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      symbol: activeSymbol,
+      side: paperSide,
+      quantity,
+      entryPrice: instrument.price,
+      markPrice: instrument.price,
+      openedAt: Date.now(),
+    };
+    setPaperAccount((current) => ({ ...current, positions: [position, ...current.positions] }));
+    setPaperOrderError("");
+    setPaperOrderMessage(`${paperSide === "long" ? "Buy long" : "Sell short"} ${quantity} ${activeSymbol} · paper order`);
+  };
+
+  const closePaperPosition = (position: PaperPosition) => {
+    if (position.symbol !== activeSymbol || !isPaperMarketLive) {
+      setPaperOrderError(`Pilih ${position.symbol} dan tunggu quote live untuk menutup posisi.`);
+      return;
+    }
+    const exitPrice = instrument.price;
+    const pnl = (position.side === "long" ? exitPrice - position.entryPrice : position.entryPrice - exitPrice) * position.quantity;
+    const closedTrade: ClosedPaperTrade = { ...position, exitPrice, pnl, closedAt: Date.now() };
+    setPaperAccount((current) => ({
+      balance: current.balance + pnl,
+      positions: current.positions.filter((item) => item.id !== position.id),
+      history: [closedTrade, ...current.history].slice(0, 30),
+    }));
+    setPaperOrderError("");
+    setPaperOrderMessage(`Posisi ${position.symbol} ditutup · ${usd(pnl)} USD`);
+  };
+
+  const setPaperSize = (fraction: number) => {
+    if (instrument.price <= 0) return;
+    const quantity = Math.floor((paperBuyingPower * fraction / instrument.price) * 1e8) / 1e8;
+    setPaperQuantity(String(quantity));
+    setPaperOrderError("");
+  };
+
   const addInstrument = () => {
     const symbol = search.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (!symbol || instruments.some((item) => item.symbol === symbol)) return;
@@ -786,11 +1013,11 @@ export default function MarketApp() {
         <a className="brand" href="#" aria-label="Atlas Market Intelligence home">
           <span className="brand-mark"><Image src="/icon.svg" alt="" width={27} height={27} priority /></span>
           <span>ATLAS</span>
-          <span className="brand-tag">MARKET INTELLIGENCE</span>
+          <span className="brand-tag">TRADING DESK</span>
         </a>
-        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> MARKET ANALYSIS <span className="topbar-divider">/</span> TRADINGVIEW · {tradingViewSymbol} <span className="topbar-divider">/</span> {liveSymbols[activeSymbol] ? "BINANCE ANALYSIS" : activeSymbol === "XAUUSD" ? `XAUUSD ANALYSIS · ${liveConnection.toUpperCase()}` : "ANALYSIS DISABLED"}</div>
+        <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {isPaperMarketLive ? "LIVE QUOTE" : "MARKET DATA"} <span className="topbar-divider">·</span> {tradingViewSymbol}</div>
         <div className="topbar-actions">
-          <button className="icon-button" aria-label="Notifications"><Icon name="bell" /></button>
+          <a className="icon-button" href="#alerts" aria-label="Price alerts"><Icon name="bell" /></a>
           <button className="icon-button" aria-label="Settings"><Icon name="settings" /></button>
           <button className="icon-button" aria-label={`${showWatchlist ? "Hide" : "Show"} watchlist`} aria-controls="watchlist-sidebar" aria-expanded={showWatchlist} title={`${showWatchlist ? "Hide" : "Show"} watchlist`} onClick={() => setShowWatchlist((visible) => !visible)}><Icon name="panel-left" /></button>
           <button className="icon-button" aria-label={`${showAccount ? "Hide" : "Show"} account sidebar`} aria-controls="account-sidebar" aria-expanded={showAccount} title={`${showAccount ? "Hide" : "Show"} account sidebar`} onClick={() => setShowAccount((visible) => !visible)}><Icon name="panel-right" /></button>
@@ -799,6 +1026,21 @@ export default function MarketApp() {
       </header>
 
       <div className={`workspace ${showWatchlist ? "" : "watchlist-hidden"} ${showAccount ? "" : "account-hidden"}`}>
+        <aside className="app-navigation" aria-label="Main menu">
+          <span className="nav-section-label">TRADE</span>
+          <a href="#overview" className={activeNav === "overview" ? "active" : ""} aria-current={activeNav === "overview" ? "location" : undefined} onClick={() => setActiveNav("overview")}><Icon name="dashboard" size={17} /><span>Overview</span></a>
+          <a href="#chart" className={activeNav === "chart" ? "active" : ""} aria-current={activeNav === "chart" ? "location" : undefined} onClick={() => setActiveNav("chart")}><Icon name="chart" size={17} /><span>Chart</span></a>
+          <a href="#order-flow" className={activeNav === "order-flow" ? "active" : ""} aria-current={activeNav === "order-flow" ? "location" : undefined} onClick={() => setActiveNav("order-flow")}><Icon name="layers" size={17} /><span>Order flow</span></a>
+          <a href="#portfolio" className={activeNav === "portfolio" ? "active" : ""} aria-current={activeNav === "portfolio" ? "location" : undefined} onClick={() => setActiveNav("portfolio")}><Icon name="wallet" size={17} /><span>Portfolio</span></a>
+          <span className="nav-section-label nav-research-label">RESEARCH</span>
+          <a href="#alerts" className={activeNav === "alerts" ? "active" : ""} aria-current={activeNav === "alerts" ? "location" : undefined} onClick={() => setActiveNav("alerts")}><Icon name="bell" size={17} /><span>Price alerts</span>{currentAlerts.length > 0 && <small>{currentAlerts.length}</small>}</a>
+          <a href="#macro" className={activeNav === "macro" ? "active" : ""} aria-current={activeNav === "macro" ? "location" : undefined} onClick={() => setActiveNav("macro")}><Icon name="globe" size={17} /><span>Macro data</span></a>
+          <div className="nav-bottom">
+            <span className={`nav-connection ${isPaperMarketLive ? "live" : ""}`} />
+            <div><strong>{isPaperMarketLive ? "Feed connected" : "Feed standby"}</strong><small>{isPaperMarketLive ? "Quotes streaming" : "Waiting for live quote"}</small></div>
+          </div>
+        </aside>
+
         <aside id="watchlist-sidebar" className={`watchlist-panel ${showWatchlist ? "open" : "closed"}`}>
           <div className="panel-heading"><div><span className="eyebrow">YOUR MARKETS</span><h2>Watchlist</h2></div><button className="icon-button subtle" aria-label="Add symbol" onClick={() => document.getElementById("watch-search")?.focus()}><Icon name="plus" /></button></div>
           <label className="search-box"><Icon name="search" size={16} /><input id="watch-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search markets" /><kbd>/</kbd></label>
@@ -817,7 +1059,7 @@ export default function MarketApp() {
         </aside>
 
         <section className="main-workspace">
-          <div className="instrument-header">
+          <div className="instrument-header" id="overview">
             <div className="instrument-title">
               <div className="instrument-avatar">{instrument.symbol.slice(0, 1)}</div>
               <div><div className="symbol-name">{instrument.symbol}<span className="market-type"> · TRADINGVIEW</span></div><div className="instrument-fullname">{instrument.name}</div></div>
@@ -833,7 +1075,7 @@ export default function MarketApp() {
             <span className="chart-currency">Chart by TradingView</span>
           </div>
 
-          <div className="chart-container">
+          <div className="chart-container" id="chart">
             <TradingViewChart symbol={tradingViewSymbol} timeframe={timeframe} />
           </div>
 
@@ -879,7 +1121,59 @@ export default function MarketApp() {
             )}
           </section>
 
-          <section className="market-tools-panel">
+          <section className="paper-portfolio-panel" id="portfolio">
+            <div className="analysis-section-heading">
+              <div><span className="eyebrow">SIMULATED ACCOUNT · USD</span><h2>Portfolio &amp; positions</h2></div>
+              <span className="analysis-timeframe">{paperAccount.positions.length} open · {paperAccount.history.length} closed</span>
+            </div>
+            <div className="paper-stats">
+              <div><span>Equity</span><strong>{usd(paperEquity)}</strong></div>
+              <div><span>Buying power</span><strong>{usd(paperBuyingPower)}</strong></div>
+              <div><span>Open P&amp;L</span><strong className={paperUnrealized >= 0 ? "positive" : "negative"}>{paperUnrealized >= 0 ? "+" : ""}{usd(paperUnrealized)}</strong></div>
+            </div>
+            <div className="paper-table-wrap">
+              <div className="paper-table">
+                <div className="paper-row paper-labels"><span>MARKET / SIDE</span><span>SIZE</span><span>ENTRY</span><span>MARK</span><span>UNREALIZED</span><span /></div>
+                {paperAccount.positions.map((position) => {
+                  const currentMark = position.symbol === activeSymbol && isPaperMarketLive ? instrument.price : position.markPrice;
+                  const pnl = (position.side === "long" ? currentMark - position.entryPrice : position.entryPrice - currentMark) * position.quantity;
+                  return (
+                    <div className="paper-row" key={position.id}>
+                      <span className="paper-market"><strong>{position.symbol}</strong><small className={position.side}>{position.side.toUpperCase()}</small></span>
+                      <span>{position.quantity}</span>
+                      <span>{money(position.entryPrice, instruments.find((item) => item.symbol === position.symbol)?.decimals ?? 2)}</span>
+                      <span>{money(currentMark, instruments.find((item) => item.symbol === position.symbol)?.decimals ?? 2)}</span>
+                      <strong className={pnl >= 0 ? "positive" : "negative"}>{pnl >= 0 ? "+" : ""}{usd(pnl)}</strong>
+                      {position.symbol !== activeSymbol
+                        ? <button className="paper-close" onClick={() => setActiveSymbol(position.symbol)}>Select</button>
+                        : <button className="paper-close" disabled={!isPaperMarketLive} onClick={() => closePaperPosition(position)}>{isPaperMarketLive ? "Close" : "Wait"}</button>}
+                    </div>
+                  );
+                })}
+                {paperAccount.positions.length === 0 && <p className="data-empty">Belum ada posisi simulasi. Gunakan ticket saat quote live tersedia.</p>}
+              </div>
+            </div>
+            {paperAccount.history.length > 0 && (
+              <details className="paper-history">
+                <summary>Riwayat transaksi · {paperAccount.history.length} terakhir</summary>
+                <div className="paper-table">
+                  {paperAccount.history.slice(0, 8).map((trade) => (
+                    <div className="paper-row history-row" key={trade.id}>
+                      <span className="paper-market"><strong>{trade.symbol}</strong><small className={trade.side}>{trade.side.toUpperCase()} · ditutup {new Date(trade.closedAt).toLocaleDateString("id-ID")}</small></span>
+                      <span>{trade.quantity}</span>
+                      <span>{money(trade.entryPrice, instruments.find((item) => item.symbol === trade.symbol)?.decimals ?? 2)}</span>
+                      <span>{money(trade.exitPrice, instruments.find((item) => item.symbol === trade.symbol)?.decimals ?? 2)}</span>
+                      <strong className={trade.pnl >= 0 ? "positive" : "negative"}>{trade.pnl >= 0 ? "+" : ""}{usd(trade.pnl)}</strong>
+                      <span />
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+            <p className="tool-disclaimer">Saldo awal simulasi $100.000. Posisi dan riwayat tersimpan di browser ini; mark untuk market lain memakai quote terakhir yang diterima. Tidak terhubung ke broker dan tidak mengirim order nyata.</p>
+          </section>
+
+          <section className="market-tools-panel" id="order-flow">
             <div className="analysis-section-heading">
               <div><span className="eyebrow">MARKET MICROSTRUCTURE</span><h2>Order flow &amp; volume tools</h2></div>
               <span className="analysis-timeframe">{liveSymbols[activeSymbol] ? "Binance Spot API" : activeSymbol === "XAUUSD" ? "FxPro FIX" : "Analysis disabled"}</span>
@@ -931,7 +1225,7 @@ export default function MarketApp() {
               </>}
           </section>
 
-          <section className="alerts-panel">
+          <section className="alerts-panel" id="alerts">
             <div className="analysis-section-heading"><div><span className="eyebrow">PRICE MONITOR</span><h2>Price alerts</h2></div><span className="analysis-timeframe">{currentAlerts.length} · {instrument.symbol}</span></div>
             <form className="alert-form" onSubmit={(event) => { event.preventDefault(); createPriceAlert(); }}>
               <select aria-label="Alert direction" value={alertDirection} onChange={(event) => setAlertDirection(event.target.value as PriceAlert["direction"])}>
@@ -947,7 +1241,7 @@ export default function MarketApp() {
             {currentAlerts.length > 0 ? <div className="alert-list">{currentAlerts.map((alert) => <div className="alert-item" key={alert.id}><span className={alert.triggered ? "triggered" : ""}>{alert.triggered ? "Triggered" : "Armed"}</span><strong>{alert.direction === "above" ? "≥" : "≤"} {money(alert.target, instrument.decimals)}</strong><button onClick={() => setAlerts((current) => current.filter((item) => item.id !== alert.id))} aria-label={`Remove alert at ${alert.target}`}>Remove</button></div>)}</div> : <p className="data-empty">Belum ada alert untuk {instrument.symbol}.</p>}
           </section>
 
-          <section className="macro-panel">
+          <section className="macro-panel" id="macro">
             <div className="analysis-section-heading"><div><span className="eyebrow">MACRO DASHBOARD · UNITED STATES</span><h2>Economic indicators</h2></div><span className="analysis-timeframe">{macroData?.source ?? "World Bank"}</span></div>
             {macroError && <p className="data-error" role="status">{macroError}</p>}
             <div className="macro-grid">{macroData?.data.map((item) => <div className="macro-card" key={item.id}><span>{item.label}</span><strong>{item.value === null ? "N/A" : `${item.value.toFixed(2)}${item.unit}`}</strong><small>{item.year ? `Latest available · ${item.year}` : "No observations"} · annual</small></div>)}</div>
@@ -956,6 +1250,52 @@ export default function MarketApp() {
         </section>
 
         <aside id="account-sidebar" className={`account-panel analysis-panel ${showAccount ? "" : "closed"}`}>
+          <section className="paper-ticket" aria-labelledby="paper-ticket-heading">
+            <div className="paper-ticket-heading">
+              <div><span className="eyebrow">ORDER TICKET</span><h2 id="paper-ticket-heading">Paper trade</h2></div>
+              <span className="paper-badge">SIMULATOR</span>
+            </div>
+            <div className="ticket-account">
+              <div><span>Equity</span><strong>{usd(paperEquity)}</strong></div>
+              <div><span>Available</span><strong>{usd(paperBuyingPower)}</strong></div>
+            </div>
+            <div className="paper-side-switch" role="group" aria-label="Position direction">
+              <button type="button" className={paperSide === "long" ? "selected long" : ""} onClick={() => { setPaperSide("long"); setPaperOrderMessage(""); }}>Buy / Long</button>
+              <button type="button" className={paperSide === "short" ? "selected short" : ""} onClick={() => { setPaperSide("short"); setPaperOrderMessage(""); }}>Sell / Short</button>
+            </div>
+            <label className="paper-quantity-label" htmlFor="paper-quantity">Quantity · {activeSymbol}</label>
+            <div className="paper-quantity-input">
+              <input id="paper-quantity" inputMode="decimal" value={paperQuantity} onChange={(event) => { setPaperQuantity(event.target.value); setPaperOrderError(""); setPaperOrderMessage(""); }} aria-label="Paper order quantity" />
+              <span>units</span>
+            </div>
+            <div className="paper-size-buttons">
+              {[25, 50, 100].map((percent) => <button type="button" key={percent} onClick={() => setPaperSize(percent / 100)}>{percent}%</button>)}
+            </div>
+            <div className="paper-order-preview"><span>Est. notional</span><strong>{isPaperMarketLive && Number.isFinite(paperOrderAmount) ? usd(paperOrderAmount) : "Quote unavailable"}</strong></div>
+            <button
+              type="button"
+              className={`paper-submit ${paperSide}`}
+              disabled={!paperAccountReady || !isPaperMarketLive || !Number.isFinite(paperOrderAmount) || paperOrderAmount <= 0 || paperOrderAmount > paperBuyingPower}
+              onClick={submitPaperOrder}
+            >
+              {paperSide === "long" ? "Open long position" : "Open short position"}
+            </button>
+            {!isPaperMarketLive && <p className="paper-ticket-note">Menunggu quote live Binance atau FxPro FIX. Simulasi tidak memakai harga indikatif.</p>}
+            {paperOrderError && <p className="data-error" role="alert">{paperOrderError}</p>}
+            {paperOrderMessage && <p className="paper-order-message" role="status">{paperOrderMessage}</p>}
+            {selectedPaperPositions.length > 0 && (
+              <div className="ticket-positions">
+                <span>OPEN · {activeSymbol}</span>
+                {selectedPaperPositions.map((position) => (
+                  <div key={position.id}>
+                    <strong className={position.side}>{position.side.toUpperCase()} · {position.quantity}</strong>
+                    <button type="button" disabled={!isPaperMarketLive} onClick={() => closePaperPosition(position)}>Close</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <small className="paper-disclaimer">Paper only · 1× notional · tersimpan lokal · tidak ada order broker.</small>
+          </section>
           {!isAnalysisInstrument ? (
             <section className="analysis-card xau-data-note">
               <div className="side-heading"><div><span className="eyebrow">ANALYSIS STATUS</span><h3>{instrument.symbol}</h3></div></div>
@@ -984,11 +1324,79 @@ export default function MarketApp() {
             <div className="analysis-row"><span>Candles this session</span><strong>{fxProCandles.length}</strong></div>
             <small>FIX has no candle history or traded volume. Candles before this connection are unavailable.</small>
           </section>}
-          <section className="signal-card">
-            <div className="side-heading"><div><span className="eyebrow">TECHNICAL OUTLOOK</span><h3>{instrument.symbol}</h3></div><span className={`signal-pill ${analysis.bias.toLowerCase()}`}>{analysis.bias}</span></div>
-            <p>{analysis.bias === "Bullish" ? "Momentum and trend indicators are aligned positively." : analysis.bias === "Bearish" ? "Momentum and trend indicators are aligned negatively." : "Trend and momentum indicators show mixed conditions."}</p>
-            <div className="signal-meter"><span className={analysis.bias.toLowerCase()} /></div>
-            <small>Rule-based indicator summary · {timeframe}</small>
+          <section className="signal-card" aria-live="polite">
+            <div className="side-heading">
+              <div><span className="eyebrow">RULE-BASED SIGNAL · {timeframe}</span><h3>{instrument.symbol}</h3></div>
+              <span className={`signal-pill ${signal.direction.toLowerCase()}`}>{signal.direction}</span>
+            </div>
+            <p>{signal.summary}</p>
+            <div className="signal-meta">
+              <span>Data: <strong>{signal.dataStatus.toUpperCase()}</strong></span>
+              <span>Confluence: <strong>{signal.alignment.aligned}/{signal.alignment.total}</strong></span>
+              <span>Source: <strong>{signal.source}</strong></span>
+              <span>Generated: <strong>{new Date(signal.generatedAt).toLocaleTimeString()}</strong></span>
+              <span>Input snapshot: <strong>{signal.inputTimestamp ? new Date(signal.inputTimestamp).toLocaleTimeString() : "—"}</strong></span>
+              <span>Expires: <strong>{signal.expiresAt ? new Date(signal.expiresAt).toLocaleTimeString() : "—"}</strong></span>
+            </div>
+            {signal.components.length > 0 && (
+              <ul className="signal-reasons">
+                {signal.components.map((component) => (
+                  <li key={component.name}>
+                    <span>{component.name} · {component.stance}</span>
+                    <small>{component.detail}</small>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="signal-context">
+              <span>EMA 20/50 <strong>{money(analysis.ema20, instrument.decimals)} / {money(analysis.ema50, instrument.decimals)}</strong></span>
+              <span>ATR 14 <strong>{money(analysis.atr14, instrument.decimals)}</strong></span>
+              <span>Support / resistance <strong>{money(analysis.support, instrument.decimals)} / {money(analysis.resistance, instrument.decimals)}</strong></span>
+              <span>Volume (5-bar avg) <strong>{signal.volume.available && signal.volume.recentAverage !== null
+                ? `${money(signal.volume.recentAverage, 4)} · ${signal.volume.comparison}`
+                : "Unavailable for this feed"}</strong></span>
+            </div>
+            {candleQuality.issues.length > 0 && (
+              <ul className="quality-issues" aria-label="Peringatan kualitas data">
+                {candleQuality.issues.map((issue) => <li key={issue}>{issue}</li>)}
+              </ul>
+            )}
+            <div className="snapshot-status">
+              <span>{signalSnapshots.length} snapshots tersimpan lokal</span>
+              <strong>{BACKTEST_RULE_VERSION}</strong>
+            </div>
+            <small>Disimpan sekali per candle saat pertama teramati; maksimal 40 snapshot di browser ini.</small>
+            {signalSnapshotError && <p className="data-error" role="status">{signalSnapshotError}</p>}
+            <small>Confluence is a rule-alignment count, not a probability or measure of future accuracy. Recommendation only; not financial advice.</small>
+          </section>
+          <section className="analysis-card backtest-card">
+            <div className="side-heading">
+              <h3>Historical evaluation</h3>
+              <span className="today-label">BINANCE · 500 BARS</span>
+            </div>
+            {liveSymbols[activeSymbol] ? (
+              <>
+                <button className="backtest-button" type="button" onClick={requestBacktest} disabled={isBacktestLoading}>
+                  {isBacktestLoading ? "Menghitung..." : "Jalankan backtest"}
+                </button>
+                {backtestError && <p className="data-error" role="status">{backtestError}</p>}
+                {backtestResult && (
+                  <>
+                    <div className="signal-context">
+                      <span>Sampel / candle <strong>{backtestResult.sampleSize} / {backtestResult.candleCount}</strong></span>
+                      <span>Win rate <strong>{backtestResult.winRatePct === null ? "—" : `${backtestResult.winRatePct.toFixed(1)}%`} · {backtestResult.wins} wins</strong></span>
+                      <span>Rata-rata net / trade <strong>{backtestResult.averageNetReturnPct === null ? "—" : `${backtestResult.averageNetReturnPct.toFixed(2)}%`}</strong></span>
+                      <span>Total net (notional tetap) <strong>{backtestResult.totalNetReturnPct === null ? "—" : `${backtestResult.totalNetReturnPct.toFixed(2)}%`}</strong></span>
+                    </div>
+                    <small>Rentang: {backtestResult.startTime ? new Date(backtestResult.startTime * 1_000).toLocaleDateString() : "—"} – {backtestResult.endTime ? new Date(backtestResult.endTime * 1_000).toLocaleDateString() : "—"} · {backtestResult.ruleVersion}</small>
+                    <small>Horizon {backtestResult.assumptions.holdingBars} candle; fee {backtestResult.assumptions.feePerSidePct}% dan slippage {backtestResult.assumptions.slippagePerSidePct}% per sisi. {backtestResult.warning}</small>
+                  </>
+                )}
+                {!backtestResult && <small>Belum dijalankan. Hasil simulasi bukan prediksi atau hasil nyata.</small>}
+              </>
+            ) : (
+              <p className="tool-disclaimer">Backtest historis baru tersedia untuk BTCUSD, ETHUSD, dan SOLUSD. FIX XAUUSD tidak menyediakan histori candle.</p>
+            )}
           </section>
           <section className="analysis-card">
             <div className="side-heading"><h3>Trend &amp; momentum</h3><span className={`trend-label ${analysis.trend.toLowerCase()}`}>{analysis.trend}</span></div>
