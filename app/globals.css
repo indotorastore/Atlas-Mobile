@@ -153,6 +153,7 @@ button:focus-visible,input:focus-visible{outline:2px solid #38bda0;outline-offse
 .macro-card>strong{color:#dfe7ef;font:500 15px "DM Mono",monospace}
 .macro-card>small{color:#738192;font-size:8px}
 @media(max-width:760px){.analysis-heading-actions{gap:6px}.market-tools-panel,.alerts-panel,.macro-panel{padding:12px 10px}.macro-grid{grid-template-columns:1fr}.profile-row{grid-template-columns:68px minmax(45px,1fr) 58px}.tool-list-row{flex-wrap:wrap}.tool-list-row small{width:100%;margin-left:0}.dom-grid{gap:8px}.orderbook-side>div{padding:5px 4px;font-size:8px}}
+@media(min-width:761px) and (max-width:1150px){.macro-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 /* Trading desk layout */
 :root{--bg:#090d12;--panel:#10171f;--panel2:#141d27;--line:rgba(148,166,184,.14);--muted:#8392a2;--text:#e8eef4;--green:#4bd6ad;--red:#f47783;--gold:#e5b85f}
@@ -282,4 +283,43 @@ html{scroll-behavior:smooth;scroll-padding-top:72px}
 @media(max-width:390px){
   .app-navigation{gap:2px;padding-right:5px;padding-left:5px}
   .app-navigation>a{gap:5px;padding:0 7px;font-size:8px}
+}
+
+
+/* Skeleton loading animation */
+@keyframes skeleton-pulse {
+  0% { opacity: .12 }
+  50% { opacity: .22 }
+  100% { opacity: .12 }
+}
+.skeleton {
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255,255,255,.08), rgba(255,255,255,.14), rgba(255,255,255,.08));
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+.skeleton-grid .indicator-cell {
+  pointer-events: none;
+}
+
+/* Avatar icon style */
+.avatar {
+  display: grid;
+  place-items: center;
+  color: #9eabb8;
+}
+.avatar svg {
+  display: block;
+}
+
+/* Mobile watchlist overlay backdrop */
+@media(max-width:760px) {
+  .watchlist-panel.open ~ .main-workspace::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 7;
+    background: rgba(0,0,0,.45);
+    backdrop-filter: blur(2px);
+  }
 }

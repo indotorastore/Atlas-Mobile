@@ -194,8 +194,23 @@ function Icon({ name, size = 18 }: { name: string; size?: number }) {
     arrow: <><path d="M5 12h14M13 6l6 6-6 6" /></>,
     "panel-left": <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
     "panel-right": <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>,
+    user: <><circle cx="12" cy="8" r="4" /><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" /></>,
   };
   return <svg {...common} aria-hidden="true">{paths[name] ?? paths.chart}</svg>;
+}
+
+function SkeletonGrid() {
+  return (
+    <div className="indicator-grid skeleton-grid" aria-hidden="true">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div className="indicator-cell" key={i} style={{ pointerEvents: "none" }}>
+          <div className="skeleton" style={{ height: 9, width: "55%" }} />
+          <div className="skeleton" style={{ height: 15, width: "75%", marginTop: 5 }} />
+          <div className="skeleton" style={{ height: 8, width: "60%", marginTop: 5 }} />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function MarketApp() {
@@ -850,26 +865,25 @@ export default function MarketApp() {
         </a>
         <div className="topbar-center"><span className={`market-pulse ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> {isLiveMarket ? "LIVE QUOTE" : "MARKET DATA"} <span className="topbar-divider">·</span> {tradingViewSymbol}</div>
         <div className="topbar-actions">
-          <a className="icon-button" href="#alerts" aria-label="Price alerts"><Icon name="bell" /></a>
-          <button className="icon-button" aria-label="Settings"><Icon name="settings" /></button>
-          <button className="icon-button" aria-label={`${showWatchlist ? "Hide" : "Show"} watchlist`} aria-controls="watchlist-sidebar" aria-expanded={showWatchlist} title={`${showWatchlist ? "Hide" : "Show"} watchlist`} onClick={() => setShowWatchlist((visible) => !visible)}><Icon name="panel-left" /></button>
-          <button className="icon-button" aria-label={`${showAnalysis ? "Hide" : "Show"} analysis sidebar`} aria-controls="analysis-sidebar" aria-expanded={showAnalysis} title={`${showAnalysis ? "Hide" : "Show"} analysis sidebar`} onClick={() => setShowAnalysis((visible) => !visible)}><Icon name="panel-right" /></button>
-          <div className="avatar">JD</div>
+          <a className="icon-button" href="#alerts" aria-label="Alert harga"><Icon name="bell" /></a>
+          <button className="icon-button" aria-label={`${showWatchlist ? "Sembunyikan" : "Tampilkan"} watchlist`} aria-controls="watchlist-sidebar" aria-expanded={showWatchlist} title={`${showWatchlist ? "Sembunyikan" : "Tampilkan"} watchlist`} onClick={() => setShowWatchlist((visible) => !visible)}><Icon name="panel-left" /></button>
+          <button className="icon-button" aria-label={`${showAnalysis ? "Sembunyikan" : "Tampilkan"} panel analisis`} aria-controls="analysis-sidebar" aria-expanded={showAnalysis} title={`${showAnalysis ? "Sembunyikan" : "Tampilkan"} panel analisis`} onClick={() => setShowAnalysis((visible) => !visible)}><Icon name="panel-right" /></button>
+          <div className="avatar" title="Profil pengguna"><Icon name="user" size={14} /></div>
         </div>
       </header>
 
       <div className={`workspace ${showWatchlist ? "" : "watchlist-hidden"} ${showAnalysis ? "" : "analysis-hidden"}`}>
         <aside className="app-navigation" aria-label="Main menu">
           <span className="nav-section-label">TRADE</span>
-          <a href="#overview" className={activeNav === "overview" ? "active" : ""} aria-current={activeNav === "overview" ? "location" : undefined} onClick={() => setActiveNav("overview")}><Icon name="dashboard" size={17} /><span>Overview</span></a>
+          <a href="#overview" className={activeNav === "overview" ? "active" : ""} aria-current={activeNav === "overview" ? "location" : undefined} onClick={() => setActiveNav("overview")}><Icon name="dashboard" size={17} /><span>Ikhtisar</span></a>
           <a href="#chart" className={activeNav === "chart" ? "active" : ""} aria-current={activeNav === "chart" ? "location" : undefined} onClick={() => setActiveNav("chart")}><Icon name="chart" size={17} /><span>Chart</span></a>
-          <a href="#order-flow" className={activeNav === "order-flow" ? "active" : ""} aria-current={activeNav === "order-flow" ? "location" : undefined} onClick={() => setActiveNav("order-flow")}><Icon name="layers" size={17} /><span>Order flow</span></a>
-          <span className="nav-section-label nav-research-label">RESEARCH</span>
-          <a href="#alerts" className={activeNav === "alerts" ? "active" : ""} aria-current={activeNav === "alerts" ? "location" : undefined} onClick={() => setActiveNav("alerts")}><Icon name="bell" size={17} /><span>Price alerts</span>{currentAlerts.length > 0 && <small>{currentAlerts.length}</small>}</a>
-          <a href="#macro" className={activeNav === "macro" ? "active" : ""} aria-current={activeNav === "macro" ? "location" : undefined} onClick={() => setActiveNav("macro")}><Icon name="globe" size={17} /><span>Macro data</span></a>
+          <a href="#order-flow" className={activeNav === "order-flow" ? "active" : ""} aria-current={activeNav === "order-flow" ? "location" : undefined} onClick={() => setActiveNav("order-flow")}><Icon name="layers" size={17} /><span>Order Flow</span></a>
+          <span className="nav-section-label nav-research-label">RISET</span>
+          <a href="#alerts" className={activeNav === "alerts" ? "active" : ""} aria-current={activeNav === "alerts" ? "location" : undefined} onClick={() => setActiveNav("alerts")}><Icon name="bell" size={17} /><span>Alert Harga</span>{currentAlerts.length > 0 && <small>{currentAlerts.length}</small>}</a>
+          <a href="#macro" className={activeNav === "macro" ? "active" : ""} aria-current={activeNav === "macro" ? "location" : undefined} onClick={() => setActiveNav("macro")}><Icon name="globe" size={17} /><span>Data Makro</span></a>
           <div className="nav-bottom">
             <span className={`nav-connection ${isLiveMarket ? "live" : ""}`} />
-            <div><strong>{isLiveMarket ? "Feed connected" : "Feed standby"}</strong><small>{isLiveMarket ? "Quotes streaming" : "Waiting for live quote"}</small></div>
+            <div><strong>{isLiveMarket ? "Feed terhubung" : "Feed standby"}</strong><small>{isLiveMarket ? "Kuotasi streaming" : "Menunggu kuotasi live"}</small></div>
           </div>
         </aside>
 
@@ -882,10 +896,10 @@ export default function MarketApp() {
               <button key={item.symbol} className={`watch-item ${activeSymbol === item.symbol ? "selected" : ""}`} onClick={() => setActiveSymbol(item.symbol)}>
                 <span className="instrument-icon">{item.symbol.slice(0, 1)}</span>
                 <span className="watch-instrument"><strong>{item.symbol}</strong><small>{item.name}</small></span>
-                <span className="watch-price"><strong>{item.symbol === activeSymbol && (activeMarketData || isFxProLive) ? item.price < 10 ? item.price.toFixed(item.decimals) : money(item.price, item.decimals) : "—"}</strong><small>{item.symbol === activeSymbol && (activeMarketData || isFxProLive) ? <span className={item.changePct >= 0 ? "positive" : "negative"}>{item.changePct >= 0 ? "+" : ""}{item.changePct.toFixed(2)}%</span> : "No Atlas quote"}</small></span>
+                <span className="watch-price"><strong>{item.symbol === activeSymbol && (activeMarketData || isFxProLive) ? item.price < 10 ? item.price.toFixed(item.decimals) : money(item.price, item.decimals) : "—"}</strong><small>{item.symbol === activeSymbol && (activeMarketData || isFxProLive) ? <span className={item.changePct >= 0 ? "positive" : "negative"}>{item.changePct >= 0 ? "+" : ""}{item.changePct.toFixed(2)}%</span> : "Kuotasi tidak tersedia"}</small></span>
               </button>
             ))}
-            {filteredInstruments.length === 0 && <div className="empty-search"><span>No matching markets</span><button onClick={addInstrument}><Icon name="plus" size={14} /> Add demo symbol</button></div>}
+            {filteredInstruments.length === 0 && <div className="empty-search"><span>Pasar tidak ditemukan</span><button onClick={addInstrument}><Icon name="plus" size={14} /> Tambah simbol demo</button></div>}
           </div>
           <div className="watchlist-footer"><span className="live-dot" /> TradingView chart · Atlas analysis: Binance / XAUUSD FIX</div>
         </aside>
@@ -895,10 +909,9 @@ export default function MarketApp() {
             <div className="instrument-title">
               <div className="instrument-avatar">{instrument.symbol.slice(0, 1)}</div>
               <div><div className="symbol-name">{instrument.symbol}<span className="market-type"> · TRADINGVIEW</span></div><div className="instrument-fullname">{instrument.name}</div></div>
-              <button className="star-button" aria-label="Favorite">☆</button>
             </div>
-            <div className="instrument-quote">{activeMarketData || isFxProLive ? <><strong>{money(instrument.price, instrument.decimals)}</strong><span className={instrument.changePct >= 0 ? "positive" : "negative"}>{instrument.change >= 0 ? "+" : ""}{money(instrument.change, instrument.decimals)} ({instrument.changePct >= 0 ? "+" : ""}{instrument.changePct.toFixed(2)}%)</span>{isFxProLive && <small className="last-tick">Change since first quote</small>}</> : <strong>—</strong>}</div>
-            <div className="session-stat"><span>CHART / ANALYSIS</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> TradingView · {tradingViewSymbol}</strong>{liveSymbols[activeSymbol] ? <small className="last-tick">Analysis: Binance Spot API · {isBinanceLive ? "live" : activeMarketData ? "historical data" : "loading"}</small> : activeSymbol === "XAUUSD" ? <small className="last-tick">Analysis: FxPro FIX quotes · {isFxProLive ? "live" : liveConnection}</small> : <small className="last-tick">Analysis disabled · data source to be decided</small>}</div>
+            <div className="instrument-quote">{activeMarketData || isFxProLive ? <><strong>{money(instrument.price, instrument.decimals)}</strong><span className={instrument.changePct >= 0 ? "positive" : "negative"}>{instrument.change >= 0 ? "+" : ""}{money(instrument.change, instrument.decimals)} ({instrument.changePct >= 0 ? "+" : ""}{instrument.changePct.toFixed(2)}%)</span>{isFxProLive && <small className="last-tick">Perubahan sejak kuotasi pertama</small>}</> : <strong>—</strong>}</div>
+            <div className="session-stat"><span>CHART / ANALISIS</span><strong><i className={`live-dot ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> TradingView · {tradingViewSymbol}</strong>{liveSymbols[activeSymbol] ? <small className="last-tick">Analisis: Binance Spot API · {isBinanceLive ? "live" : activeMarketData ? "data historis" : "memuat"}</small> : activeSymbol === "XAUUSD" ? <small className="last-tick">Analisis: FxPro FIX · {isFxProLive ? "live" : liveConnection}</small> : <small className="last-tick">Analisis dinonaktifkan · sumber data belum ditentukan</small>}</div>
           </div>
 
           <div className="chart-toolbar">
@@ -911,11 +924,11 @@ export default function MarketApp() {
             <TradingViewChart symbol={tradingViewSymbol} timeframe={timeframe} />
           </div>
 
-          <div className="chart-legend"><span>Chart: TradingView · {tradingViewSymbol}</span><span className="legend-demo">{liveSymbols[activeSymbol] ? `Analysis: Binance API · ${isBinanceLive ? "live candle updates" : activeMarketData ? "historical candles loaded" : "loading data"}` : activeSymbol === "XAUUSD" ? `Analysis: FxPro FIX · ${fxProCandles.length} candles collected since connection` : "Analysis disabled for this pair; data source will be decided later"}</span></div>
+          <div className="chart-legend"><span>Chart: TradingView · {tradingViewSymbol}</span><span className="legend-demo">{liveSymbols[activeSymbol] ? `Analisis: Binance API · ${isBinanceLive ? "pembaruan candle live" : activeMarketData ? "candle historis dimuat" : "memuat data"}` : activeSymbol === "XAUUSD" ? `Analisis: FxPro FIX · ${fxProCandles.length} candle terkumpul sejak koneksi` : "Analisis dinonaktifkan untuk pair ini; sumber data akan ditentukan kemudian"}</span></div>
 
           <section className="analysis-table-panel">
             <div className="analysis-section-heading">
-              <div><span className="eyebrow">TECHNICAL SUMMARY</span><h2>Indicator dashboard</h2></div>
+              <div><span className="eyebrow">RINGKASAN TEKNIKAL</span><h2>Dasbor Indikator</h2></div>
               <div className="analysis-heading-actions">
                 <span className="analysis-timeframe">{timeframe} · {instrument.symbol}</span>
                 <button className="gemini-button" onClick={requestGeminiAnalysis} disabled={isGeminiLoading || !isGeminiAnalysisReady} title={!isGeminiAnalysisReady ? "Gemini aktif setelah data Binance atau 50 candle FIX XAUUSD tersedia" : undefined}>
@@ -926,20 +939,23 @@ export default function MarketApp() {
             {!isAnalysisInstrument
               ? <p className="tool-disclaimer">Analisis untuk {instrument.symbol} belum diaktifkan. Saat ini analisis hanya tersedia untuk BTCUSD, ETHUSD, SOLUSD dari Binance dan XAUUSD dari kuotasi FIX.</p>
               : !isAnalysisDataReady
-                ? <p className="tool-disclaimer">{activeSymbol === "XAUUSD"
-                  ? `Menunggu kuotasi FIX. Indikator awal tersedia setelah candle pertama; Gemini memerlukan 50 candle. Terkumpul ${fxProCandles.length}/50; histori sebelum koneksi tidak tersedia.`
-                  : marketDataError || "Menunggu histori candle Binance Spot untuk analisis."}</p>
+                ? <>
+                    <p className="tool-disclaimer">{activeSymbol === "XAUUSD"
+                      ? `Menunggu kuotasi FIX. Indikator awal tersedia setelah candle pertama; Gemini memerlukan 50 candle. Terkumpul ${fxProCandles.length}/50; histori sebelum koneksi tidak tersedia.`
+                      : marketDataError || "Menunggu histori candle Binance Spot untuk analisis."}</p>
+                    {!marketDataError && activeSymbol !== "XAUUSD" && <SkeletonGrid />}
+                  </>
                 : <>
               {activeSymbol === "XAUUSD" && <p className="tool-disclaimer">Indikator dihitung dari candle midpoint FxPro FIX yang terkumpul sejak koneksi aktif; tidak ada backfill histori.</p>}
               {activeSymbol === "XAUUSD" && !isXauAnalysisReady && <p className="tool-disclaimer">Analisis XAUUSD masih terbatas: {fxProCandles.length}/50 candle. Gemini aktif setelah 50 candle terkumpul.</p>}
               {liveSymbols[activeSymbol] && <p className="tool-disclaimer">Indikator dan analisis Gemini menggunakan candle Binance Spot API; chart TradingView adalah tampilan terpisah.</p>}
               <div className="indicator-grid">
-              <div className="indicator-cell"><span>RSI · 14</span><strong className={analysis.rsi14 >= 70 ? "negative" : analysis.rsi14 <= 30 ? "positive" : ""}>{analysis.rsi14.toFixed(1)}</strong><small>{analysis.rsi14 >= 70 ? "Overbought zone" : analysis.rsi14 <= 30 ? "Oversold zone" : "Neutral momentum"}</small></div>
-              <div className="indicator-cell"><span>MACD · 12/26/9</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "+" : ""}{money(analysis.macdHistogram, instrument.decimals)}</strong><small>{analysis.macdHistogram >= 0 ? "Positive momentum" : "Negative momentum"}</small></div>
-              <div className="indicator-cell"><span>EMA · 20</span><strong>{money(analysis.ema20, instrument.decimals)}</strong><small>{instrument.price >= analysis.ema20 ? "Price above average" : "Price below average"}</small></div>
-              <div className="indicator-cell"><span>EMA · 50</span><strong>{money(analysis.ema50, instrument.decimals)}</strong><small>{analysis.ema20 >= analysis.ema50 ? "Average trend rising" : "Average trend falling"}</small></div>
-              <div className="indicator-cell"><span>ATR · 14</span><strong>{money(analysis.atr14, instrument.decimals)}</strong><small>Recent volatility range</small></div>
-              <div className="indicator-cell"><span>20-bar range</span><strong>{money(analysis.support, instrument.decimals)} – {money(analysis.resistance, instrument.decimals)}</strong><small>Support / resistance estimate</small></div>
+              <div className="indicator-cell"><span>RSI · 14</span><strong className={analysis.rsi14 >= 70 ? "negative" : analysis.rsi14 <= 30 ? "positive" : ""}>{analysis.rsi14.toFixed(1)}</strong><small>{analysis.rsi14 >= 70 ? "Zona overbought" : analysis.rsi14 <= 30 ? "Zona oversold" : "Momentum netral"}</small></div>
+              <div className="indicator-cell"><span>MACD · 12/26/9</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "+" : ""}{money(analysis.macdHistogram, instrument.decimals)}</strong><small>{analysis.macdHistogram >= 0 ? "Momentum positif" : "Momentum negatif"}</small></div>
+              <div className="indicator-cell"><span>EMA · 20</span><strong>{money(analysis.ema20, instrument.decimals)}</strong><small>{instrument.price >= analysis.ema20 ? "Harga di atas rata-rata" : "Harga di bawah rata-rata"}</small></div>
+              <div className="indicator-cell"><span>EMA · 50</span><strong>{money(analysis.ema50, instrument.decimals)}</strong><small>{analysis.ema20 >= analysis.ema50 ? "Tren rata-rata naik" : "Tren rata-rata turun"}</small></div>
+              <div className="indicator-cell"><span>ATR · 14</span><strong>{money(analysis.atr14, instrument.decimals)}</strong><small>Rentang volatilitas terkini</small></div>
+              <div className="indicator-cell"><span>Rentang 20 bar</span><strong>{money(analysis.support, instrument.decimals)} – {money(analysis.resistance, instrument.decimals)}</strong><small>Estimasi support / resistansi</small></div>
               </div>
               </>}
             {(isGeminiLoading || geminiAnalysis || geminiError) && (
@@ -955,12 +971,12 @@ export default function MarketApp() {
 
           <section className="market-tools-panel" id="order-flow">
             <div className="analysis-section-heading">
-              <div><span className="eyebrow">MARKET MICROSTRUCTURE</span><h2>Order flow &amp; volume tools</h2></div>
-              <span className="analysis-timeframe">{liveSymbols[activeSymbol] ? "Binance Spot API" : activeSymbol === "XAUUSD" ? "FxPro FIX" : "Analysis disabled"}</span>
+              <div><span className="eyebrow">MIKROSTRUKTUR PASAR</span><h2>Order Flow &amp; Alat Volume</h2></div>
+              <span className="analysis-timeframe">{liveSymbols[activeSymbol] ? "Binance Spot API" : activeSymbol === "XAUUSD" ? "FxPro FIX" : "Analisis nonaktif"}</span>
             </div>
             {marketDataError && <p className="data-error" role="status">{marketDataError}</p>}
             {!isAnalysisInstrument
-              ? <p className="data-empty">Market analysis is not enabled for {instrument.symbol}. Only Binance crypto pairs and XAUUSD are currently supported.</p>
+              ? <p className="data-empty">Analisis pasar belum diaktifkan untuk {instrument.symbol}. Saat ini hanya mendukung aset kripto Binance dan XAUUSD.</p>
               : <>
             <div className="market-tool-tabs" role="tablist" aria-label="Market analysis tools">
               {([
@@ -1006,25 +1022,25 @@ export default function MarketApp() {
           </section>
 
           <section className="alerts-panel" id="alerts">
-            <div className="analysis-section-heading"><div><span className="eyebrow">PRICE MONITOR</span><h2>Price alerts</h2></div><span className="analysis-timeframe">{currentAlerts.length} · {instrument.symbol}</span></div>
+            <div className="analysis-section-heading"><div><span className="eyebrow">PEMANTAU HARGA</span><h2>Alert Harga</h2></div><span className="analysis-timeframe">{currentAlerts.length} · {instrument.symbol}</span></div>
             <form className="alert-form" onSubmit={(event) => { event.preventDefault(); createPriceAlert(); }}>
-              <select aria-label="Alert direction" value={alertDirection} onChange={(event) => setAlertDirection(event.target.value as PriceAlert["direction"])}>
-                <option value="above">Price rises above</option>
-                <option value="below">Price falls below</option>
+              <select aria-label="Arah alert" value={alertDirection} onChange={(event) => setAlertDirection(event.target.value as PriceAlert["direction"])}>
+                <option value="above">Harga naik di atas</option>
+                <option value="below">Harga turun di bawah</option>
               </select>
-              <input aria-label="Alert target price" type="number" step="any" min="0" value={alertTarget} onChange={(event) => setAlertTarget(event.target.value)} placeholder={`Target · ${instrument.symbol}`} />
-              <button type="submit">Create alert</button>
-              {typeof Notification !== "undefined" && Notification.permission === "default" && <button type="button" className="notification-button" onClick={() => void Notification.requestPermission()}>Enable browser notification</button>}
+              <input aria-label="Harga target alert" type="number" step="any" min="0" value={alertTarget} onChange={(event) => setAlertTarget(event.target.value)} placeholder={`Target · ${instrument.symbol}`} />
+              <button type="submit">Buat alert</button>
+              {typeof Notification !== "undefined" && Notification.permission === "default" && <button type="button" className="notification-button" onClick={() => void Notification.requestPermission()}>Aktifkan notifikasi</button>}
             </form>
             {alertsError && <p className="data-error" role="alert">{alertsError}</p>}
             <p className="tool-disclaimer">Alert disimpan di browser ini dan hanya dipantau saat dashboard terbuka. {isBinanceLive ? "Harga memakai feed live Binance Spot." : isFxProLive ? "Harga memakai midpoint kuotasi live FxPro FIX." : "Harga instrumen ini masih ilustratif."} Notifikasi browser memerlukan izin.</p>
-            {currentAlerts.length > 0 ? <div className="alert-list">{currentAlerts.map((alert) => <div className="alert-item" key={alert.id}><span className={alert.triggered ? "triggered" : ""}>{alert.triggered ? "Triggered" : "Armed"}</span><strong>{alert.direction === "above" ? "≥" : "≤"} {money(alert.target, instrument.decimals)}</strong><button onClick={() => setAlerts((current) => current.filter((item) => item.id !== alert.id))} aria-label={`Remove alert at ${alert.target}`}>Remove</button></div>)}</div> : <p className="data-empty">Belum ada alert untuk {instrument.symbol}.</p>}
+            {currentAlerts.length > 0 ? <div className="alert-list">{currentAlerts.map((alert) => <div className="alert-item" key={alert.id}><span className={alert.triggered ? "triggered" : ""}>{alert.triggered ? "Terpicu" : "Aktif"}</span><strong>{alert.direction === "above" ? "≥" : "≤"} {money(alert.target, instrument.decimals)}</strong><button onClick={() => setAlerts((current) => current.filter((item) => item.id !== alert.id))} aria-label={`Hapus alert di ${alert.target}`}>Hapus</button></div>)}</div> : <p className="data-empty">Belum ada alert untuk {instrument.symbol}.</p>}
           </section>
 
           <section className="macro-panel" id="macro">
-            <div className="analysis-section-heading"><div><span className="eyebrow">MACRO DASHBOARD · UNITED STATES</span><h2>Economic indicators</h2></div><span className="analysis-timeframe">{macroData?.source ?? "World Bank"}</span></div>
+            <div className="analysis-section-heading"><div><span className="eyebrow">DASBOR MAKRO · AMERIKA SERIKAT</span><h2>Indikator Ekonomi</h2></div><span className="analysis-timeframe">{macroData?.source ?? "World Bank"}</span></div>
             {macroError && <p className="data-error" role="status">{macroError}</p>}
-            <div className="macro-grid">{macroData?.data.map((item) => <div className="macro-card" key={item.id}><span>{item.label}</span><strong>{item.value === null ? "N/A" : `${item.value.toFixed(2)}${item.unit}`}</strong><small>{item.year ? `Latest available · ${item.year}` : "No observations"} · annual</small></div>)}</div>
+            <div className="macro-grid">{macroData?.data.map((item) => <div className="macro-card" key={item.id}><span>{item.label}</span><strong>{item.value === null ? "N/A" : `${item.value.toFixed(2)}${item.unit}`}</strong><small>{item.year ? `Terakhir tersedia · ${item.year}` : "Tidak ada observasi"} · tahunan</small></div>)}</div>
             <p className="tool-disclaimer">Sumber: World Bank Indicators API · seri tahunan dengan jeda publikasi, bukan kalender rilis atau data real-time. {macroData ? "Negara: United States." : "Memuat indikator makro..."}</p>
           </section>
         </section>
@@ -1032,31 +1048,36 @@ export default function MarketApp() {
         <aside id="analysis-sidebar" className={`analysis-sidebar analysis-panel ${showAnalysis ? "" : "closed"}`}>
           {!isAnalysisInstrument ? (
             <section className="analysis-card xau-data-note">
-              <div className="side-heading"><div><span className="eyebrow">ANALYSIS STATUS</span><h3>{instrument.symbol}</h3></div></div>
-              <p>TradingView provides the chart. Atlas analysis is currently enabled only for Binance crypto pairs and XAUUSD.</p>
-              <small>The data source for analysis of other instruments has not been selected.</small>
+              <div className="side-heading"><div><span className="eyebrow">STATUS ANALISIS</span><h3>{instrument.symbol}</h3></div></div>
+              <p>TradingView menyediakan chart. Analisis Atlas saat ini hanya aktif untuk aset kripto Binance dan XAUUSD.</p>
+              <small>Sumber data untuk analisis instrumen lain belum ditentukan.</small>
             </section>
           ) : activeSymbol === "XAUUSD" && !isAnalysisDataReady ? (
             <section className="analysis-card xau-data-note">
               <div className="side-heading"><div><span className="eyebrow">XAUUSD DATA</span><h3>FxPro FIX</h3></div></div>
-              <p>Chart: TradingView embed. Analysis uses midpoint candles built from live FxPro FIX quotes received in this session.</p>
+              <p>Chart: TradingView embed. Analisis menggunakan candle midpoint dari kuotasi live FxPro FIX sesi ini.</p>
               {fxProQuote && <div className="analysis-row"><span>FxPro FIX midpoint</span><strong>{money((fxProQuote.bid + fxProQuote.ask) / 2, instrument.decimals)}</strong></div>}
-              <div className="analysis-row"><span>Candles this session</span><strong>{fxProCandles.length}</strong></div>
-              <small>FIX has no candle history or traded volume. Indicators appear after the first quote; Gemini requires 50 candles. Earlier data is unavailable.</small>
+              <div className="analysis-row"><span>Candle sesi ini</span><strong>{fxProCandles.length}</strong></div>
+              <small>FIX tidak menyediakan riwayat candle atau volume transaksi. Indikator muncul setelah kuotasi pertama; Gemini memerlukan 50 candle. Data sebelumnya tidak tersedia.</small>
             </section>
           ) : !isAnalysisDataReady ? (
             <section className="analysis-card xau-data-note">
               <div className="side-heading"><div><span className="eyebrow">BINANCE ANALYSIS</span><h3>{instrument.symbol}</h3></div></div>
-              <p>Technical analysis will appear after Binance Spot API candles load.</p>
+              <p>Analisis teknikal akan muncul setelah candle Binance Spot API dimuat.</p>
+              {!marketDataError && <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 10 }}>
+                <div className="skeleton" style={{ height: 11, width: "70%" }} />
+                <div className="skeleton" style={{ height: 11, width: "55%" }} />
+                <div className="skeleton" style={{ height: 11, width: "80%" }} />
+              </div>}
               {marketDataError && <p className="data-error" role="status">{marketDataError}</p>}
             </section>
           ) : <>
           {activeSymbol === "XAUUSD" && <section className="analysis-card xau-data-note">
             <div className="side-heading"><div><span className="eyebrow">XAUUSD DATA</span><h3>FxPro FIX</h3></div></div>
-            <p>Chart: TradingView embed. Analysis uses midpoint candles built from live FxPro FIX quotes received in this session.</p>
+            <p>Chart: TradingView embed. Analisis menggunakan candle midpoint dari kuotasi live FxPro FIX sesi ini.</p>
             {fxProQuote && <div className="analysis-row"><span>FxPro FIX midpoint</span><strong>{money((fxProQuote.bid + fxProQuote.ask) / 2, instrument.decimals)}</strong></div>}
-            <div className="analysis-row"><span>Candles this session</span><strong>{fxProCandles.length}</strong></div>
-            <small>FIX has no candle history or traded volume. Candles before this connection are unavailable.</small>
+            <div className="analysis-row"><span>Candle sesi ini</span><strong>{fxProCandles.length}</strong></div>
+            <small>FIX tidak menyediakan riwayat candle atau volume transaksi. Data sebelum koneksi ini tidak tersedia.</small>
           </section>}
           <section className="signal-card" aria-live="polite">
             <div className="side-heading">
@@ -1066,11 +1087,11 @@ export default function MarketApp() {
             <p>{signal.summary}</p>
             <div className="signal-meta">
               <span>Data: <strong>{signal.dataStatus.toUpperCase()}</strong></span>
-              <span>Confluence: <strong>{signal.alignment.aligned}/{signal.alignment.total}</strong></span>
-              <span>Source: <strong>{signal.source}</strong></span>
-              <span>Generated: <strong>{new Date(signal.generatedAt).toLocaleTimeString()}</strong></span>
-              <span>Input snapshot: <strong>{signal.inputTimestamp ? new Date(signal.inputTimestamp).toLocaleTimeString() : "—"}</strong></span>
-              <span>Expires: <strong>{signal.expiresAt ? new Date(signal.expiresAt).toLocaleTimeString() : "—"}</strong></span>
+              <span>Konfluens: <strong>{signal.alignment.aligned}/{signal.alignment.total}</strong></span>
+              <span>Sumber: <strong>{signal.source}</strong></span>
+              <span>Dibuat: <strong>{new Date(signal.generatedAt).toLocaleTimeString()}</strong></span>
+              <span>Snapshot: <strong>{signal.inputTimestamp ? new Date(signal.inputTimestamp).toLocaleTimeString() : "—"}</strong></span>
+              <span>Kedaluwarsa: <strong>{signal.expiresAt ? new Date(signal.expiresAt).toLocaleTimeString() : "—"}</strong></span>
             </div>
             {signal.components.length > 0 && (
               <ul className="signal-reasons">
@@ -1085,10 +1106,10 @@ export default function MarketApp() {
             <div className="signal-context">
               <span>EMA 20/50 <strong>{money(analysis.ema20, instrument.decimals)} / {money(analysis.ema50, instrument.decimals)}</strong></span>
               <span>ATR 14 <strong>{money(analysis.atr14, instrument.decimals)}</strong></span>
-              <span>Support / resistance <strong>{money(analysis.support, instrument.decimals)} / {money(analysis.resistance, instrument.decimals)}</strong></span>
-              <span>Volume (5-bar avg) <strong>{signal.volume.available && signal.volume.recentAverage !== null
+              <span>Support / Resistance <strong>{money(analysis.support, instrument.decimals)} / {money(analysis.resistance, instrument.decimals)}</strong></span>
+              <span>Volume (rata-rata 5 bar) <strong>{signal.volume.available && signal.volume.recentAverage !== null
                 ? `${money(signal.volume.recentAverage, 4)} · ${signal.volume.comparison}`
-                : "Unavailable for this feed"}</strong></span>
+                : "Tidak tersedia untuk feed ini"}</strong></span>
             </div>
             {candleQuality.issues.length > 0 && (
               <ul className="quality-issues" aria-label="Peringatan kualitas data">
@@ -1101,11 +1122,11 @@ export default function MarketApp() {
             </div>
             <small>Disimpan sekali per candle saat pertama teramati; maksimal 40 snapshot di browser ini.</small>
             {signalSnapshotError && <p className="data-error" role="status">{signalSnapshotError}</p>}
-            <small>Confluence is a rule-alignment count, not a probability or measure of future accuracy. Recommendation only; not financial advice.</small>
+            <small>Konfluens adalah jumlah aturan yang selaras, bukan probabilitas atau jaminan akurasi di masa depan. Hanya rekomendasi; bukan nasihat keuangan.</small>
           </section>
           <section className="analysis-card backtest-card">
             <div className="side-heading">
-              <h3>Historical evaluation</h3>
+              <h3>Evaluasi Historis</h3>
               <span className="today-label">BINANCE · 500 BARS</span>
             </div>
             {liveSymbols[activeSymbol] ? (
@@ -1118,7 +1139,7 @@ export default function MarketApp() {
                   <>
                     <div className="signal-context">
                       <span>Sampel / candle <strong>{backtestResult.sampleSize} / {backtestResult.candleCount}</strong></span>
-                      <span>Win rate <strong>{backtestResult.winRatePct === null ? "—" : `${backtestResult.winRatePct.toFixed(1)}%`} · {backtestResult.wins} wins</strong></span>
+                      <span>Win rate <strong>{backtestResult.winRatePct === null ? "—" : `${backtestResult.winRatePct.toFixed(1)}%`} · {backtestResult.wins} menang</strong></span>
                       <span>Rata-rata net / trade <strong>{backtestResult.averageNetReturnPct === null ? "—" : `${backtestResult.averageNetReturnPct.toFixed(2)}%`}</strong></span>
                       <span>Total net (notional tetap) <strong>{backtestResult.totalNetReturnPct === null ? "—" : `${backtestResult.totalNetReturnPct.toFixed(2)}%`}</strong></span>
                     </div>
@@ -1133,25 +1154,25 @@ export default function MarketApp() {
             )}
           </section>
           <section className="analysis-card">
-            <div className="side-heading"><h3>Trend &amp; momentum</h3><span className={`trend-label ${analysis.trend.toLowerCase()}`}>{analysis.trend}</span></div>
-            <div className="analysis-row"><span>Last price</span><strong>{money(instrument.price, instrument.decimals)}</strong></div>
-            <div className="analysis-row"><span>RSI (14)</span><strong>{analysis.rsi14.toFixed(1)} <small>{analysis.rsi14 > 70 ? "Overbought" : analysis.rsi14 < 30 ? "Oversold" : "Neutral"}</small></strong></div>
-            <div className="analysis-row"><span>MACD signal</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "Positive" : "Negative"}</strong></div>
-            <div className="analysis-row"><span>EMA alignment</span><strong>{analysis.ema20 >= analysis.ema50 ? "20 above 50" : "20 below 50"}</strong></div>
+            <div className="side-heading"><h3>Tren & Momentum</h3><span className={`trend-label ${analysis.trend.toLowerCase()}`}>{analysis.trend}</span></div>
+            <div className="analysis-row"><span>Harga terakhir</span><strong>{money(instrument.price, instrument.decimals)}</strong></div>
+            <div className="analysis-row"><span>RSI (14)</span><strong>{analysis.rsi14.toFixed(1)} <small>{analysis.rsi14 > 70 ? "Overbought" : analysis.rsi14 < 30 ? "Oversold" : "Netral"}</small></strong></div>
+            <div className="analysis-row"><span>Sinyal MACD</span><strong className={analysis.macdHistogram >= 0 ? "positive" : "negative"}>{analysis.macdHistogram >= 0 ? "Positif" : "Negatif"}</strong></div>
+            <div className="analysis-row"><span>Alignment EMA</span><strong>{analysis.ema20 >= analysis.ema50 ? "EMA20 di atas EMA50" : "EMA20 di bawah EMA50"}</strong></div>
           </section>
           <section className="analysis-card">
-            <div className="side-heading"><h3>Key levels</h3><span className="today-label">20 BARS</span></div>
-            <div className="level-row"><span>Resistance</span><strong className="negative">{money(analysis.resistance, instrument.decimals)}</strong></div>
+            <div className="side-heading"><h3>Level Kunci</h3><span className="today-label">20 BAR</span></div>
+            <div className="level-row"><span>Resistansi</span><strong className="negative">{money(analysis.resistance, instrument.decimals)}</strong></div>
             <div className="level-track"><i style={{ left: `${Math.min(100, Math.max(0, ((instrument.price - analysis.support) / Math.max(analysis.resistance - analysis.support, Number.EPSILON)) * 100))}%` }} /></div>
             <div className="level-row"><span>Support</span><strong className="positive">{money(analysis.support, instrument.decimals)}</strong></div>
             <div className="analysis-row"><span>ATR (14)</span><strong>{money(analysis.atr14, instrument.decimals)}</strong></div>
           </section>
-          <p className="analysis-disclaimer">Crypto indicators use Binance Spot API candles. They are separate from the TradingView chart feed and are not financial advice.</p>
+          <p className="analysis-disclaimer">Indikator kripto menggunakan candle Binance Spot API, terpisah dari feed chart TradingView. Bukan nasihat keuangan.</p>
           </>}
         </aside>
       </div>
 
-      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> System operational <span className="status-divider">·</span> {isBinanceLive ? "Binance Spot" : isFxProLive ? "FxPro FIX" : "TradingView chart"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Chart by TradingView</a><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
+      <footer className="statusbar"><div><span className={`status-live ${liveConnection === "reconnecting" ? "pulse-warning" : ""}`} /> Sistem operasional <span className="status-divider">·</span> {isBinanceLive ? "Binance Spot" : isFxProLive ? "FxPro FIX" : "TradingView chart"}</div><div><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Chart oleh TradingView</a><span className="status-divider">·</span><span>Atlas · Market Intelligence</span></div></footer>
     </main>
   );
 }
